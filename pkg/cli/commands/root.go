@@ -19,9 +19,16 @@ var rootCmd = &cobra.Command{
 	Short: "Starknet Sepolia Testnet Faucet CLI",
 	Long: `A CLI tool to request testnet tokens (ETH and STRK) for Starknet Sepolia.
 
-The faucet uses Proof of Work to prevent abuse and has a 24-hour cooldown
-period per address.`,
-	Version: "1.0.0",
+Examples:
+  starknet-faucet request 0xYOUR_ADDRESS              # Request STRK tokens (default)
+  starknet-faucet request 0xYOUR_ADDRESS --token ETH  # Request ETH tokens
+  starknet-faucet request 0xYOUR_ADDRESS --both       # Request both ETH and STRK
+  starknet-faucet status 0xYOUR_ADDRESS               # Check cooldown status
+  starknet-faucet info                                # View faucet information
+
+The faucet uses Proof of Work and CAPTCHA to prevent abuse.
+Cooldown period: 24 hours per address.`,
+	Version: "1.0.6",
 }
 
 // Execute runs the root command
