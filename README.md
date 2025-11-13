@@ -197,7 +197,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - **npm package**: https://www.npmjs.com/package/starknet-faucet
 - **GitHub repository**: https://github.com/Giri-Aayush/starknet-faucet
-- **API endpoint**: https://starknet-faucet-gnq5.onrender.com
 - **Developer**: [Aayush Giri](https://github.com/Giri-Aayush)
 
 ---
