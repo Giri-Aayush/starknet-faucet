@@ -41,8 +41,10 @@ func main() {
 	redis, err := cache.NewRedisClient(
 		cfg.RedisURL,
 		cfg.CooldownHours,
-		cfg.MaxRequestsPerHour,
-		cfg.MaxRequestsPerDay,
+		cfg.MaxRequestsPerHourIP,
+		cfg.MaxRequestsPerDayIP,
+		cfg.MaxRequestsPerHourAddress,
+		cfg.MaxRequestsPerDayAddress,
 		cfg.MaxChallengesPerHour,
 	)
 	if err != nil {

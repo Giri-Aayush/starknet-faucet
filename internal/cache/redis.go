@@ -10,15 +10,17 @@ import (
 
 // RedisClient wraps the Redis client with faucet-specific operations
 type RedisClient struct {
-	client         *redis.Client
-	cooldownHours  int
-	maxPerHour     int
-	maxPerDay      int
-	maxChallengesPerHour int
+	client                *redis.Client
+	cooldownHours         int
+	maxPerHourIP          int
+	maxPerDayIP           int
+	maxPerHourAddress     int
+	maxPerDayAddress      int
+	maxChallengesPerHour  int
 }
 
 // NewRedisClient creates a new Redis client
-func NewRedisClient(redisURL string, cooldownHours, maxPerHour, maxPerDay, maxChallengesPerHour int) (*RedisClient, error) {
+func NewRedisClient(redisURL string, cooldownHours, maxPerHourIP, maxPerDayIP, maxPerHourAddress, maxPerDayAddress, maxChallengesPerHour int) (*RedisClient, error) {
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
@@ -35,11 +37,13 @@ func NewRedisClient(redisURL string, cooldownHours, maxPerHour, maxPerDay, maxCh
 	}
 
 	return &RedisClient{
-		client:               client,
-		cooldownHours:        cooldownHours,
-		maxPerHour:           maxPerHour,
-		maxPerDay:            maxPerDay,
-		maxChallengesPerHour: maxChallengesPerHour,
+		client:                client,
+		cooldownHours:         cooldownHours,
+		maxPerHourIP:          maxPerHourIP,
+		maxPerDayIP:           maxPerDayIP,
+		maxPerHourAddress:     maxPerHourAddress,
+		maxPerDayAddress:      maxPerDayAddress,
+		maxChallengesPerHour:  maxChallengesPerHour,
 	}, nil
 }
 
@@ -113,7 +117,7 @@ func (r *RedisClient) CheckAddressRateLimit(ctx context.Context, address string)
 	if err != nil && err != redis.Nil {
 		return false, err
 	}
-	if hourlyCount >= r.maxPerHour {
+	if hourlyCount >= r.maxPerHourAddress {
 		return false, nil
 	}
 
@@ -123,7 +127,7 @@ func (r *RedisClient) CheckAddressRateLimit(ctx context.Context, address string)
 	if err != nil && err != redis.Nil {
 		return false, err
 	}
-	if dailyCount >= r.maxPerDay {
+	if dailyCount >= r.maxPerDayAddress {
 		return false, nil
 	}
 
@@ -147,7 +151,7 @@ func (r *RedisClient) IncrementAddressRateLimit(ctx context.Context, address str
 	return err
 }
 
-// CheckIPRateLimit checks if an IP has exceeded rate limits (deprecated, kept for backwards compatibility)
+// CheckIPRateLimit checks if an IP has exceeded rate limits
 func (r *RedisClient) CheckIPRateLimit(ctx context.Context, ip string) (bool, error) {
 	// Check hourly limit
 	hourlyKey := fmt.Sprintf("ratelimit:ip:hour:%s", ip)
@@ -155,7 +159,7 @@ func (r *RedisClient) CheckIPRateLimit(ctx context.Context, ip string) (bool, er
 	if err != nil && err != redis.Nil {
 		return false, err
 	}
-	if hourlyCount >= r.maxPerHour {
+	if hourlyCount >= r.maxPerHourIP {
 		return false, nil
 	}
 
@@ -165,7 +169,7 @@ func (r *RedisClient) CheckIPRateLimit(ctx context.Context, ip string) (bool, er
 	if err != nil && err != redis.Nil {
 		return false, err
 	}
-	if dailyCount >= r.maxPerDay {
+	if dailyCount >= r.maxPerDayIP {
 		return false, nil
 	}
 

@@ -32,9 +32,13 @@ type Config struct {
 	DripAmountETH   string
 	ChallengeTTL    int // in seconds
 
-	// Rate Limiting
-	MaxRequestsPerHour int
-	MaxRequestsPerDay  int
+	// Rate Limiting - Per IP
+	MaxRequestsPerHourIP int
+	MaxRequestsPerDayIP  int
+
+	// Rate Limiting - Per Address
+	MaxRequestsPerHourAddress int
+	MaxRequestsPerDayAddress  int
 
 	// Global Distribution Limits (prevents drain attacks)
 	MaxTokensPerHourSTRK  float64 // Max STRK distributed per hour globally
@@ -75,9 +79,13 @@ func Load() (*Config, error) {
 		DripAmountETH:  getEnv("DRIP_AMOUNT_ETH", "0.02"),
 		ChallengeTTL:   getEnvAsInt("CHALLENGE_TTL", 300), // 5 minutes
 
-		// Rate limiting
-		MaxRequestsPerHour: getEnvAsInt("MAX_REQUESTS_PER_HOUR", 5),
-		MaxRequestsPerDay:  getEnvAsInt("MAX_REQUESTS_PER_DAY", 3),
+		// Rate limiting - Per IP (more lenient, one person may have multiple addresses)
+		MaxRequestsPerHourIP: getEnvAsInt("MAX_REQUESTS_PER_HOUR_IP", 10),
+		MaxRequestsPerDayIP:  getEnvAsInt("MAX_REQUESTS_PER_DAY_IP", 20),
+
+		// Rate limiting - Per Address (stricter, one address shouldn't need frequent refills)
+		MaxRequestsPerHourAddress: getEnvAsInt("MAX_REQUESTS_PER_HOUR_ADDRESS", 2),
+		MaxRequestsPerDayAddress:  getEnvAsInt("MAX_REQUESTS_PER_DAY_ADDRESS", 5),
 
 		// Global distribution limits (anti-drain protection) - set to 0 to disable
 		MaxTokensPerHourSTRK: getEnvAsFloat("MAX_TOKENS_PER_HOUR_STRK", 0), // 0 = disabled
