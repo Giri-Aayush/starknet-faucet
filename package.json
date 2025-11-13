@@ -1,6 +1,6 @@
 {
   "name": "starknet-faucet",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "CLI tool to request testnet tokens from Starknet Sepolia faucet",
   "bin": {
     "starknet-faucet": "./bin/starknet-faucet.js"

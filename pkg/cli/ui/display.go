@@ -34,7 +34,7 @@ func PrintBanner() {
    ███████║   ██║   ██║  ██║██║  ██║██║  ██╗██║ ╚████║███████╗   ██║       ██║     ██║  ██║╚██████╔╝╚██████╗███████╗   ██║
    ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝       ╚═╝     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚══════╝   ╚═╝
 
-                                         ⚡ Powered by Starknet • Secured by PoW ⚡
+                                         Made with love • Secured by PoW
 `
 	fmt.Println(cyan(banner))
 }
