@@ -28,7 +28,7 @@ Examples:
 
 The faucet uses Proof of Work and CAPTCHA to prevent abuse.
 Cooldown period: 24 hours per address.`,
-	Version: "1.0.6",
+	Version: "1.0.8",
 }
 
 // Execute runs the root command
