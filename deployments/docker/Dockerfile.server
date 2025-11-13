@@ -13,14 +13,14 @@ WORKDIR /app
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# Download dependencies
+# Download dependencies (this will download Go 1.25.4 toolchain)
 RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the server
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
+# Build the server (explicitly use the downloaded toolchain)
+RUN CGO_ENABLED=0 GOOS=linux GOTOOLCHAIN=auto go build -a -installsuffix cgo -o server ./cmd/server
 
 # Final stage
 FROM alpine:latest
