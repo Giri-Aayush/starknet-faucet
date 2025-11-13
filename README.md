@@ -87,7 +87,7 @@ Commands:
   help        Help about any command
 
 Flags:
-  --api-url string   Faucet API URL (default "https://faucet.nethermind.io")
+  --api-url string   Faucet API URL (default "https://starknet-faucet-gnq5.onrender.com")
   --json             Output in JSON format
   -v, --verbose      Verbose output
   --help             Help for starknet-faucet
@@ -331,7 +331,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Built with [starknet.go](https://github.com/NethermindEth/starknet.go) v0.17.0 by Nethermind
+- Built with [starknet.go](https://github.com/NethermindEth/starknet.go) v0.17.0
 - Powered by [Starknet](https://starknet.io/)
 - Block explorer by [Voyager](https://voyager.online/)
 
