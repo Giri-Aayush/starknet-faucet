@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 		PoWDifficulty:  getEnvAsInt("POW_DIFFICULTY", 4),
 		CooldownHours:  getEnvAsInt("COOLDOWN_HOURS", 24),
 		DripAmountSTRK: getEnv("DRIP_AMOUNT_STRK", "10"),
-		DripAmountETH:  getEnv("DRIP_AMOUNT_ETH", "0.02"),
+		DripAmountETH:  getEnv("DRIP_AMOUNT_ETH", "0.01"),
 		ChallengeTTL:   getEnvAsInt("CHALLENGE_TTL", 300), // 5 minutes
 
 		// Rate limiting - Per IP (more lenient, one person may have multiple addresses)

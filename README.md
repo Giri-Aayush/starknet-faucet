@@ -124,7 +124,7 @@ starknet-faucet info
 | Token | Amount per Request | Cooldown Period |
 |-------|-------------------|-----------------|
 | STRK  | 10 STRK          | 24 hours per address |
-| ETH   | 0.02 ETH         | 24 hours per address |
+| ETH   | 0.01 ETH         | 24 hours per address |
 
 **Rate limiting:**
 - IP-based limits: 10 requests/hour, 20 requests/day
