@@ -26,28 +26,45 @@ func NewAPIClient(baseURL string) *APIClient {
 	}
 }
 
-// GetChallenge fetches a new PoW challenge
+// GetChallenge fetches a new PoW challenge with retry on server wake-up
 func (c *APIClient) GetChallenge() (*models.ChallengeResponse, error) {
 	var response models.ChallengeResponse
 	var errResponse models.ErrorResponse
 
-	resp, err := c.client.R().
-		SetResult(&response).
-		SetError(&errResponse).
-		Post(fmt.Sprintf("%s/api/v1/challenge", c.baseURL))
+	maxRetries := 3
+	retryDelay := 20 * time.Second
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to get challenge: %w", err)
-	}
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := c.client.R().
+			SetResult(&response).
+			SetError(&errResponse).
+			Post(fmt.Sprintf("%s/api/v1/challenge", c.baseURL))
 
-	if resp.IsError() {
-		if errResponse.Error != "" {
-			return nil, fmt.Errorf("API error: %s", errResponse.Error)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get challenge: %w", err)
 		}
-		return nil, fmt.Errorf("API returned status %d", resp.StatusCode())
+
+		// Check if server is waking up (502/503)
+		if resp.StatusCode() == 502 || resp.StatusCode() == 503 {
+			if attempt < maxRetries {
+				fmt.Printf("\n⏳ Server is waking up... (attempt %d/%d, waiting %ds)\n", attempt, maxRetries, int(retryDelay.Seconds()))
+				time.Sleep(retryDelay)
+				continue
+			}
+			return nil, fmt.Errorf("server is still starting up after %d attempts. Please try again in a moment", maxRetries)
+		}
+
+		if resp.IsError() {
+			if errResponse.Error != "" {
+				return nil, fmt.Errorf("API error: %s", errResponse.Error)
+			}
+			return nil, fmt.Errorf("API returned status %d", resp.StatusCode())
+		}
+
+		return &response, nil
 	}
 
-	return &response, nil
+	return nil, fmt.Errorf("max retries exceeded")
 }
 
 // RequestTokens requests tokens from the faucet
