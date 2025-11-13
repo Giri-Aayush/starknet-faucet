@@ -32,7 +32,7 @@ func (c *APIClient) GetChallenge() (*models.ChallengeResponse, error) {
 	var errResponse models.ErrorResponse
 
 	maxRetries := 3
-	retryDelay := 20 * time.Second
+	retryDelay := 60 * time.Second // 1 minute between retries
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		resp, err := c.client.R().
