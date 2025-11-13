@@ -34,7 +34,7 @@ func Execute() {
 
 func init() {
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&apiURL, "api-url", "https://faucet.nethermind.io", "Faucet API URL")
+	rootCmd.PersistentFlags().StringVar(&apiURL, "api-url", "https://starknet-faucet-gnq5.onrender.com", "Faucet API URL")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "Output in JSON format")
 
