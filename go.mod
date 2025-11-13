@@ -1,6 +1,6 @@
 module github.com/Giri-Aayush/starknet-faucet
 
-go 1.22
+go 1.23
 
 require (
 	github.com/NethermindEth/juno v0.15.7
