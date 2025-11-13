@@ -1,0 +1,48 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+server
+starknet-faucet
+*.test
+*.out
+
+# Environment files (CONTAINS PRIVATE KEYS)
+.env
+.env.local
+.env.production
+
+# Account files (CONTAINS PRIVATE KEYS - NEVER PUSH!)
+account_info.txt
+new_account.txt
+scripts/*.txt
+
+# Captcha questions (Don't expose - defeats the purpose!)
+pkg/cli/captcha/questions.go
+
+# Testing & Development
+TEST_MANUAL.md
+Makefile
+
+# Documentation (too many files)
+docs/
+
+# IDE & Claude
+.vscode/
+.idea/
+.claude/
+.DS_Store
+
+# Logs & temp
+*.log
+tmp/
+*.tmp
+
+# Build
+dist/
+build/
+
+# Redis
+dump.rdb

@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deployments/docker/Dockerfile.server
+    ports:
+      - "3000:3000"
+    environment:
+      - FAUCET_PRIVATE_KEY=${FAUCET_PRIVATE_KEY}
+      - FAUCET_ADDRESS=${FAUCET_ADDRESS}
+      - STARKNET_RPC_URL=${STARKNET_RPC_URL}
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NETWORK=${NETWORK:-sepolia}
+      - POW_DIFFICULTY=${POW_DIFFICULTY:-4}
+      - COOLDOWN_HOURS=${COOLDOWN_HOURS:-24}
+      - DRIP_AMOUNT_STRK=${DRIP_AMOUNT_STRK:-100}
+      - DRIP_AMOUNT_ETH=${DRIP_AMOUNT_ETH:-0.02}
+      - ETH_TOKEN_ADDRESS=${ETH_TOKEN_ADDRESS:-0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7}
+      - STRK_TOKEN_ADDRESS=${STRK_TOKEN_ADDRESS:-0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d}
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis-data:
