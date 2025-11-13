@@ -173,35 +173,6 @@ The npm package automatically downloads the appropriate pre-built binary for you
 - macOS (Intel, Apple Silicon)
 - Windows (AMD64)
 
-## 🛠️ For Developers
-
-### Build from Source
-
-Requirements:
-- Go 1.23+
-- Git
-
-```bash
-git clone https://github.com/Giri-Aayush/starknet-faucet.git
-cd starknet-faucet
-go build -o starknet-faucet ./cmd/cli
-```
-
-### Run Local Development Server
-
-1. Clone the repository
-2. Set up environment variables (see `.env.example`)
-3. Run: `go run ./cmd/server`
-
-### API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/info` | GET | Get faucet information |
-| `/api/v1/challenge` | POST | Request PoW challenge |
-| `/api/v1/faucet` | POST | Submit solution and request tokens |
-| `/api/v1/status/:address` | GET | Check address cooldown status |
-
 ## 🔐 Security Features
 
 - **Proof of Work**: CPU-based challenge prevents automated abuse
@@ -229,6 +200,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: [GitHub Issues](https://github.com/Giri-Aayush/starknet-faucet/issues)
 - **NPM**: [npm package](https://www.npmjs.com/package/starknet-faucet)
 - **Faucet API**: https://starknet-faucet-gnq5.onrender.com
+- **Developer**: [Aayush Giri](https://github.com/Giri-Aayush)
 
 ---
 
