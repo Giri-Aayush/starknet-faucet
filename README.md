@@ -1,63 +1,74 @@
-# 🚰 Starknet Faucet
+# Starknet Faucet
 
-Get testnet **ETH** and **STRK** tokens for Starknet Sepolia - directly from your terminal!
+A command-line tool for requesting testnet tokens (ETH and STRK) on Starknet Sepolia. Built to simplify the developer experience when working with Starknet applications.
 
 [![npm](https://img.shields.io/npm/v/starknet-faucet)](https://www.npmjs.com/package/starknet-faucet)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Downloads](https://img.shields.io/npm/dm/starknet-faucet)](https://www.npmjs.com/package/starknet-faucet)
 
-## ✨ Features
+## Why This Exists
 
-- 🖥️ **Terminal-First**: No browser needed, perfect for development workflows
-- 💎 **Both Tokens**: Get STRK and ETH for Starknet Sepolia testnet
-- 🤖 **Smart Protection**: CAPTCHA + Proof of Work prevents abuse
-- ⚡ **Fast**: Tokens arrive in ~30 seconds
-- 🎨 **Beautiful CLI**: Colored output with progress indicators
-- 🔗 **Explorer Links**: Direct links to view your transaction
+While building on Starknet, I found myself constantly switching between terminal and browser to get testnet tokens. It disrupted my workflow and slowed down development. This tool brings the faucet directly to your terminal, where development happens.
 
-## 📦 Installation
+[Read more about the motivation behind this project](https://x.com/AayushStack/status/1989022633657340373?s=20)
 
-Install globally via npm:
+## Features
+
+- **Terminal-native**: Request tokens without leaving your development environment
+- **Dual token support**: Get both STRK and ETH for Starknet Sepolia
+- **Abuse protection**: Proof of Work and CAPTCHA verification prevent bot abuse
+- **Fast delivery**: Tokens arrive in approximately 30 seconds
+- **Transaction tracking**: Direct explorer links to monitor your requests
+- **Cross-platform**: Works on Linux, macOS, and Windows
+
+## Installation
 
 ```bash
 npm install -g starknet-faucet
 ```
 
-That's it! The CLI will be available as `starknet-faucet` command.
+The CLI will be available as the `starknet-faucet` command.
 
-## 🚀 Quick Start
+## Usage
 
-### Request STRK Tokens
-
+### Request STRK tokens (default)
 ```bash
 starknet-faucet request 0xYOUR_ADDRESS
 ```
 
-### Request ETH Tokens
-
+### Request ETH tokens
 ```bash
 starknet-faucet request 0xYOUR_ADDRESS --token ETH
 ```
 
-### Request Both ETH and STRK
-
+### Request both tokens
 ```bash
 starknet-faucet request 0xYOUR_ADDRESS --both
 ```
 
-## 📖 Commands
-
-### Request Tokens
+### Check address status
 ```bash
-starknet-faucet request <ADDRESS> [flags]
+starknet-faucet status 0xYOUR_ADDRESS
 ```
 
-**Flags:**
-- `--token string` - Token to request: `ETH` or `STRK` (default: `STRK`)
-- `--both` - Request both ETH and STRK tokens
-- `--json` - Output result in JSON format
+### View faucet information
+```bash
+starknet-faucet info
+```
 
-**Example:**
+## Commands
+
+### request
+Request tokens for a Starknet address.
+
+**Flags:**
+- `--token string` - Token type: `ETH` or `STRK` (default: `STRK`)
+- `--both` - Request both ETH and STRK tokens
+- `--json` - Output in JSON format
+- `--verbose, -v` - Enable verbose logging
+- `--api-url string` - Custom faucet API URL
+
+**Example output:**
 ```bash
 $ starknet-faucet request 0x0223C87c0641e802a7DA24E68a46F8b0094F17762bf703284Bba99A7e62970D4
 
@@ -68,10 +79,10 @@ $ starknet-faucet request 0x0223C87c0641e802a7DA24E68a46F8b0094F17762bf703284Bba
    ███████║   ██║   ██║  ██║██║  ██║██║  ██╗██║ ╚████║███████╗   ██║       ██║     ██║  ██║╚██████╔╝╚██████╗███████╗   ██║
    ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝       ╚═╝     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚══════╝   ╚═╝
 
-                                         ⚡ Powered by Starknet • Secured by PoW ⚡
+                                         Made with love • Secured by PoW
 
 ═══════════════════════════════════════════════════════
-  🤖 Quick Verification (helps prevent bot abuse)
+  Quick Verification (helps prevent bot abuse)
 ═══════════════════════════════════════════════════════
 
   What is 2 + 2? 4
@@ -94,57 +105,50 @@ $ starknet-faucet request 0x0223C87c0641e802a7DA24E68a46F8b0094F17762bf703284Bba
 ✓ Tokens will arrive in ~30 seconds.
 ```
 
-### Check Status
-Check if an address is in cooldown:
+### status
+Check if an address is in cooldown period.
+
 ```bash
-starknet-faucet status <ADDRESS>
+starknet-faucet status 0xYOUR_ADDRESS
 ```
 
-### Get Faucet Info
-View faucet balance and limits:
+### info
+View faucet balance, distribution limits, and configuration.
+
 ```bash
 starknet-faucet info
 ```
 
-## 💰 Distribution Limits
+## Distribution Limits
 
-| Token | Amount per Request | Rate Limit |
-|-------|-------------------|------------|
-| STRK  | 10 STRK          | 2/hour, 5/day per address |
-| ETH   | 0.02 ETH         | 2/hour, 5/day per address |
+| Token | Amount per Request | Cooldown Period |
+|-------|-------------------|-----------------|
+| STRK  | 10 STRK          | 24 hours per address |
+| ETH   | 0.02 ETH         | 24 hours per address |
 
-**Additional Protection:**
-- Maximum 10 requests per hour per IP
-- Maximum 20 requests per day per IP
-- Proof of Work challenge (difficulty: 4)
-- Interactive CAPTCHA verification
+**Rate limiting:**
+- IP-based limits: 10 requests/hour, 20 requests/day
+- Address-based limits: 2 requests/hour, 5 requests/day
 
-## 🔧 Advanced Usage
+## Security
 
-### Custom API URL
-```bash
-starknet-faucet request 0xADDRESS --api-url https://your-faucet-instance.com
-```
+The faucet implements multiple layers of protection:
 
-### JSON Output
-```bash
-starknet-faucet request 0xADDRESS --json
-```
+- **Proof of Work**: CPU-based challenge with difficulty 4
+- **CAPTCHA verification**: Human verification through interactive questions
+- **Rate limiting**: Both IP-based and address-based limits
+- **Challenge expiration**: 5-minute time-to-live on PoW challenges
+- **Balance protection**: Automatic shutdown at 5% remaining balance
 
-### Verbose Logging
-```bash
-starknet-faucet request 0xADDRESS --verbose
-```
+## API Health Check
 
-## 🏥 Health Check
-
-To check if the faucet API is running:
+To verify the faucet API is operational:
 
 ```bash
 curl https://starknet-faucet-gnq5.onrender.com/api/v1/info
 ```
 
-**Response:**
+**Sample response:**
 ```json
 {
   "network": "sepolia",
@@ -164,44 +168,38 @@ curl https://starknet-faucet-gnq5.onrender.com/api/v1/info
 }
 ```
 
-## 📦 NPM Package
+## Platform Support
 
-**Package:** [@npmjs.com/package/starknet-faucet](https://www.npmjs.com/package/starknet-faucet)
-
-The npm package automatically downloads the appropriate pre-built binary for your platform:
+Pre-built binaries are available for:
 - Linux (AMD64, ARM64)
 - macOS (Intel, Apple Silicon)
 - Windows (AMD64)
 
-## 🔐 Security Features
+The npm package automatically downloads the correct binary for your platform during installation.
 
-- **Proof of Work**: CPU-based challenge prevents automated abuse
-- **CAPTCHA Questions**: Human verification with 100+ questions
-- **Rate Limiting**: Per-IP and per-address limits
-- **Challenge Expiration**: 5-minute TTL on PoW challenges
-- **Balance Protection**: Stops distribution at 5% remaining balance
+## Technical Details
 
-## 🤝 Contributing
+- Built with Go 1.23+
+- Uses [starknet.go](https://github.com/NethermindEth/starknet.go) v0.17.0
+- Backend API hosted on Render
+- Redis-based caching for rate limiting
+- Transaction tracking via [Voyager](https://voyager.online/)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## Contributing
 
-## 📝 License
+Contributions are welcome. Please submit pull requests or open issues on GitHub.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## License
 
-## 🙏 Acknowledgments
+MIT License - see [LICENSE](LICENSE) for details.
 
-- Built with [starknet.go](https://github.com/NethermindEth/starknet.go) v0.17.0
-- Powered by [Starknet](https://starknet.io/)
-- Block explorer by [Voyager](https://voyager.online/)
+## Links
 
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/Giri-Aayush/starknet-faucet/issues)
-- **NPM**: [npm package](https://www.npmjs.com/package/starknet-faucet)
-- **Faucet API**: https://starknet-faucet-gnq5.onrender.com
+- **npm package**: https://www.npmjs.com/package/starknet-faucet
+- **GitHub repository**: https://github.com/Giri-Aayush/starknet-faucet
+- **API endpoint**: https://starknet-faucet-gnq5.onrender.com
 - **Developer**: [Aayush Giri](https://github.com/Giri-Aayush)
 
 ---
 
-Made with ❤️ for the Starknet community
+Built for developers who prefer staying in the terminal.
