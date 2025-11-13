@@ -75,7 +75,7 @@ func Load() (*Config, error) {
 		// Faucet settings
 		PoWDifficulty:  getEnvAsInt("POW_DIFFICULTY", 4),
 		CooldownHours:  getEnvAsInt("COOLDOWN_HOURS", 24),
-		DripAmountSTRK: getEnv("DRIP_AMOUNT_STRK", "100"),
+		DripAmountSTRK: getEnv("DRIP_AMOUNT_STRK", "10"),
 		DripAmountETH:  getEnv("DRIP_AMOUNT_ETH", "0.02"),
 		ChallengeTTL:   getEnvAsInt("CHALLENGE_TTL", 300), // 5 minutes
 
@@ -93,7 +93,7 @@ func Load() (*Config, error) {
 		MaxTokensPerHourETH:  getEnvAsFloat("MAX_TOKENS_PER_HOUR_ETH", 0),  // 0 = disabled
 		MaxTokensPerDayETH:   getEnvAsFloat("MAX_TOKENS_PER_DAY_ETH", 0),    // 0 = disabled
 		MaxChallengesPerHour: getEnvAsInt("MAX_CHALLENGES_PER_HOUR", 10),       // Max 10 challenge requests/hour/IP
-		MinBalanceProtectPct: getEnvAsInt("MIN_BALANCE_PROTECT_PCT", 20),       // Stop at 20% remaining
+		MinBalanceProtectPct: getEnvAsInt("MIN_BALANCE_PROTECT_PCT", 5),       // Stop at 5% remaining
 	}
 
 	// Validate required fields
