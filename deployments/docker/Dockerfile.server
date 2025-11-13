@@ -19,8 +19,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the server using the downloaded go1.25.4 toolchain
-RUN CGO_ENABLED=0 GOOS=linux go1.25.4 build -a -installsuffix cgo -o server ./cmd/server
+# Build the server - the go command will automatically use the downloaded go1.25.4 toolchain
+RUN GOTOOLCHAIN=go1.25.4 CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
 
 # Final stage
 FROM alpine:latest
