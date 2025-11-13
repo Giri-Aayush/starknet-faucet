@@ -79,11 +79,11 @@ func Load() (*Config, error) {
 		MaxRequestsPerHour: getEnvAsInt("MAX_REQUESTS_PER_HOUR", 5),
 		MaxRequestsPerDay:  getEnvAsInt("MAX_REQUESTS_PER_DAY", 3),
 
-		// Global distribution limits (anti-drain protection)
-		MaxTokensPerHourSTRK: getEnvAsFloat("MAX_TOKENS_PER_HOUR_STRK", 20.0), // 20 STRK/hour = 4 requests
-		MaxTokensPerDaySTRK:  getEnvAsFloat("MAX_TOKENS_PER_DAY_STRK", 100.0),  // 100 STRK/day
-		MaxTokensPerHourETH:  getEnvAsFloat("MAX_TOKENS_PER_HOUR_ETH", 0.002),  // 0.002 ETH/hour = 4 requests
-		MaxTokensPerDayETH:   getEnvAsFloat("MAX_TOKENS_PER_DAY_ETH", 0.01),    // 0.01 ETH/day
+		// Global distribution limits (anti-drain protection) - set to 0 to disable
+		MaxTokensPerHourSTRK: getEnvAsFloat("MAX_TOKENS_PER_HOUR_STRK", 0), // 0 = disabled
+		MaxTokensPerDaySTRK:  getEnvAsFloat("MAX_TOKENS_PER_DAY_STRK", 0),  // 0 = disabled
+		MaxTokensPerHourETH:  getEnvAsFloat("MAX_TOKENS_PER_HOUR_ETH", 0),  // 0 = disabled
+		MaxTokensPerDayETH:   getEnvAsFloat("MAX_TOKENS_PER_DAY_ETH", 0),    // 0 = disabled
 		MaxChallengesPerHour: getEnvAsInt("MAX_CHALLENGES_PER_HOUR", 10),       // Max 10 challenge requests/hour/IP
 		MinBalanceProtectPct: getEnvAsInt("MIN_BALANCE_PROTECT_PCT", 20),       // Stop at 20% remaining
 	}

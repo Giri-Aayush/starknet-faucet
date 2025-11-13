@@ -120,22 +120,36 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check IP rate limit
+	// Check IP rate limit (hourly and daily per IP)
 	ip := c.IP()
-	canRequest, err := h.redis.CheckIPRateLimit(ctx, ip)
+	canRequestIP, err := h.redis.CheckIPRateLimit(ctx, ip)
 	if err != nil {
 		h.logger.Error("Failed to check IP rate limit", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
 			Error: "Failed to check rate limit",
 		})
 	}
-	if !canRequest {
+	if !canRequestIP {
 		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
-			Error: "IP rate limit exceeded",
+			Error: "IP rate limit exceeded. Please wait before making another request.",
 		})
 	}
 
-	// Check address cooldown
+	// Check address rate limit (hourly and daily per address)
+	canRequestAddr, err := h.redis.CheckAddressRateLimit(ctx, req.Address)
+	if err != nil {
+		h.logger.Error("Failed to check address rate limit", zap.Error(err))
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error: "Failed to check rate limit",
+		})
+	}
+	if !canRequestAddr {
+		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+			Error: "Address rate limit exceeded. Please wait before making another request.",
+		})
+	}
+
+	// Check address cooldown (optional additional check - can be removed if not needed)
 	inCooldown, nextRequestTime, err := h.redis.IsAddressInCooldown(ctx, req.Address)
 	if err != nil {
 		h.logger.Error("Failed to check address cooldown", zap.Error(err))
@@ -261,12 +275,19 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		})
 	}
 
-	// Set cooldown and increment rate limit
+	// Increment IP rate limit counters
+	if err := h.redis.IncrementIPRateLimit(ctx, ip); err != nil {
+		h.logger.Error("Failed to increment IP rate limit", zap.Error(err))
+	}
+
+	// Increment address rate limit counters
+	if err := h.redis.IncrementAddressRateLimit(ctx, req.Address); err != nil {
+		h.logger.Error("Failed to increment address rate limit", zap.Error(err))
+	}
+
+	// Set cooldown (optional - can be removed if using only hourly/daily limits)
 	if err := h.redis.SetAddressCooldown(ctx, req.Address); err != nil {
 		h.logger.Error("Failed to set cooldown", zap.Error(err))
-	}
-	if err := h.redis.IncrementIPRateLimit(ctx, ip); err != nil {
-		h.logger.Error("Failed to increment rate limit", zap.Error(err))
 	}
 
 	// Build response
