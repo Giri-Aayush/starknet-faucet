@@ -1,12 +1,12 @@
 {
   "name": "starknet-faucet",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "CLI tool to request testnet tokens from Starknet Sepolia faucet",
   "bin": {
     "starknet-faucet": "./bin/starknet-faucet.js"
   },
   "scripts": {
-    "postinstall": "node ./scripts/install.js",
+    "postinstall": "node ./install.js",
     "test": "node ./bin/starknet-faucet.js --help"
   },
   "keywords": [
@@ -33,7 +33,7 @@
   },
   "files": [
     "bin/",
-    "scripts/install.js",
+    "install.js",
     "README.md"
   ]
 }
