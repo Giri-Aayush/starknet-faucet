@@ -39,6 +39,7 @@ Rate Limits (per IP):
     • 5 requests per day
     • Single token (STRK or ETH) = 1 request
     • Both tokens (--both) = 2 requests
+    • After 5th request: 24-hour cooldown
 
   Hourly Throttle:
     • 1 STRK request per hour
@@ -52,7 +53,7 @@ Security:
   • CAPTCHA verification (human check)
 
 Need help? Visit: https://github.com/Giri-Aayush/starknet-faucet`,
-	Version: "1.0.12",
+	Version: "1.0.13",
 }
 
 // Execute runs the root command

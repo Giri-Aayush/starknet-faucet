@@ -65,9 +65,10 @@ type InfoResponse struct {
 
 // LimitInfo contains information about faucet limits
 type LimitInfo struct {
-	StrkPerRequest string `json:"strk_per_request"`
-	EthPerRequest  string `json:"eth_per_request"`
-	CooldownHours  int    `json:"cooldown_hours"`
+	StrkPerRequest     string `json:"strk_per_request"`
+	EthPerRequest      string `json:"eth_per_request"`
+	DailyRequestsPerIP int    `json:"daily_requests_per_ip"`
+	TokenThrottleHours int    `json:"token_throttle_hours"`
 }
 
 // PoWInfo contains information about PoW requirements

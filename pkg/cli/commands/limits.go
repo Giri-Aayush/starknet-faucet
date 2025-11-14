@@ -30,7 +30,8 @@ func runLimits(cmd *cobra.Command, args []string) error {
 	fmt.Println("  • 5 requests per day")
 	fmt.Println("  • Single token (STRK or ETH) = 1 request")
 	fmt.Println("  • Both tokens (--both) = 2 requests (1 STRK + 1 ETH)")
-	fmt.Println("  • Resets at midnight UTC")
+	fmt.Println("  • After 5th request: 24-hour cooldown")
+	fmt.Println("  • Cooldown starts from the time of 5th request")
 	fmt.Println()
 
 	fmt.Println("⏱  HOURLY THROTTLE (Per Token)")

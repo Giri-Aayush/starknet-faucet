@@ -124,12 +124,22 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 
 	ip := c.IP()
 
-	// 1. Check IP daily limit (5 requests/day)
-	canRequest, currentCount, err := h.redis.CheckIPDailyLimit(ctx, ip)
+	// 1. Check IP daily limit (5 requests/day) and 24h cooldown
+	canRequest, currentCount, cooldownEnd, err := h.redis.CheckIPDailyLimit(ctx, ip)
 	if err != nil {
 		h.logger.Error("Failed to check IP daily limit", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
 			Error: "Failed to check rate limit",
+		})
+	}
+
+	// If in 24h cooldown after hitting limit
+	if !canRequest && cooldownEnd != nil {
+		hoursRemaining := time.Until(*cooldownEnd).Hours()
+		errorMsg := fmt.Sprintf("Daily limit reached. In 24-hour cooldown (%.1f hours remaining). Run 'starknet-faucet limits' for details.",
+			hoursRemaining)
+		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+			Error: errorMsg,
 		})
 	}
 
@@ -141,8 +151,8 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 
 	// Check if there's enough quota
 	if !canRequest || (currentCount+requestCost) > h.config.MaxRequestsPerDayIP {
-		used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
-		errorMsg := fmt.Sprintf("IP daily limit reached (%d/%d requests used). Resets at midnight UTC. Run 'starknet-faucet limits' for details.",
+		used, _, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+		errorMsg := fmt.Sprintf("IP daily limit reached (%d/%d requests used). Run 'starknet-faucet limits' for details.",
 			used, h.config.MaxRequestsPerDayIP)
 		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
 			Error: errorMsg,
@@ -161,7 +171,7 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		}
 		if !canRequestSTRK {
 			minutesRemaining := int(time.Until(*nextSTRK).Minutes())
-			used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+			used, _, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
 			errorMsg := fmt.Sprintf("STRK hourly throttle active. Next request in %d min. Daily quota: %d/%d used. Run 'starknet-faucet limits' for details.",
 				minutesRemaining, used, h.config.MaxRequestsPerDayIP)
 			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
@@ -178,7 +188,7 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		}
 		if !canRequestETH {
 			minutesRemaining := int(time.Until(*nextETH).Minutes())
-			used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+			used, _, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
 			errorMsg := fmt.Sprintf("ETH hourly throttle active. Next request in %d min. Daily quota: %d/%d used. Run 'starknet-faucet limits' for details.",
 				minutesRemaining, used, h.config.MaxRequestsPerDayIP)
 			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
@@ -196,7 +206,7 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		}
 		if !canRequestToken {
 			minutesRemaining := int(time.Until(*nextAvailable).Minutes())
-			used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+			used, _, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
 			errorMsg := fmt.Sprintf("%s hourly throttle active. Next request in %d min. Daily quota: %d/%d used. Run 'starknet-faucet limits' for details.",
 				req.Token, minutesRemaining, used, h.config.MaxRequestsPerDayIP)
 			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
@@ -365,7 +375,7 @@ func (h *Handler) GetStatus(c *fiber.Ctx) error {
 	ip := c.IP()
 
 	// Get IP daily quota
-	used, remaining, err := h.redis.GetIPDailyQuota(ctx, ip)
+	used, remaining, cooldownEnd, err := h.redis.GetIPDailyQuota(ctx, ip)
 	if err != nil {
 		h.logger.Error("Failed to get IP daily quota", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
@@ -373,7 +383,7 @@ func (h *Handler) GetStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	canRequest := remaining > 0
+	canRequest := remaining > 0 && cooldownEnd == nil
 
 	response := models.StatusResponse{
 		Address:    address,
@@ -420,9 +430,10 @@ func (h *Handler) GetInfo(c *fiber.Ctx) error {
 	response := models.InfoResponse{
 		Network: h.config.Network,
 		Limits: models.LimitInfo{
-			StrkPerRequest: h.config.DripAmountSTRK,
-			EthPerRequest:  h.config.DripAmountETH,
-			CooldownHours:  0, // No longer used (simplified to IP daily + hourly throttle)
+			StrkPerRequest:     h.config.DripAmountSTRK,
+			EthPerRequest:      h.config.DripAmountETH,
+			DailyRequestsPerIP: h.config.MaxRequestsPerDayIP,
+			TokenThrottleHours: 1, // 1 hour throttle per token
 		},
 		PoW: models.PoWInfo{
 			Enabled:    true,
@@ -553,7 +564,7 @@ func (h *Handler) GetQuota(c *fiber.Ctx) error {
 	ip := c.IP()
 
 	// Get IP daily quota
-	used, remaining, err := h.redis.GetIPDailyQuota(ctx, ip)
+	used, remaining, cooldownEnd, err := h.redis.GetIPDailyQuota(ctx, ip)
 	if err != nil {
 		h.logger.Error("Failed to get IP daily quota", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
@@ -580,9 +591,11 @@ func (h *Handler) GetQuota(c *fiber.Ctx) error {
 
 	response := map[string]interface{}{
 		"daily_limit": map[string]interface{}{
-			"total":     h.config.MaxRequestsPerDayIP,
-			"used":      used,
-			"remaining": remaining,
+			"total":              h.config.MaxRequestsPerDayIP,
+			"used":               used,
+			"remaining":          remaining,
+			"cooldown_end":       cooldownEnd,
+			"in_cooldown":        cooldownEnd != nil,
 		},
 		"hourly_throttle": map[string]interface{}{
 			"strk": map[string]interface{}{

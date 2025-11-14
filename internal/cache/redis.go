@@ -66,28 +66,59 @@ func (r *RedisClient) DeleteChallenge(ctx context.Context, challengeID string) e
 
 // New Simplified Rate Limiting Operations
 
-// CheckIPDailyLimit checks if IP has exceeded daily request limit (5/day)
-// Returns (canRequest, currentCount, error)
-func (r *RedisClient) CheckIPDailyLimit(ctx context.Context, ip string) (bool, int, error) {
+// CheckIPDailyLimit checks if IP has exceeded daily request limit (5/day) or is in 24h cooldown
+// Returns (canRequest, currentCount, cooldownEnd, error)
+func (r *RedisClient) CheckIPDailyLimit(ctx context.Context, ip string) (bool, int, *time.Time, error) {
+	// First check if IP is in 24h cooldown (after hitting 5 requests)
+	cooldownKey := fmt.Sprintf("cooldown:ip:%s", ip)
+	cooldownEnd, err := r.client.Get(ctx, cooldownKey).Result()
+	if err == nil {
+		// Cooldown exists, parse the end time
+		endTime, parseErr := time.Parse(time.RFC3339, cooldownEnd)
+		if parseErr == nil && time.Now().Before(endTime) {
+			return false, r.maxDailyRequestsIP, &endTime, nil
+		}
+		// Cooldown expired, delete it
+		r.client.Del(ctx, cooldownKey)
+	}
+
+	// Check current request count
 	key := fmt.Sprintf("ratelimit:ip:day:%s", ip)
 	count, err := r.client.Get(ctx, key).Int()
 	if err != nil && err != redis.Nil {
-		return false, 0, err
+		return false, 0, nil, err
 	}
 	if count >= r.maxDailyRequestsIP {
-		return false, count, nil
+		return false, count, nil, nil
 	}
-	return true, count, nil
+	return true, count, nil, nil
 }
 
 // IncrementIPDailyLimit increments IP daily counter by specified amount (1 for single token, 2 for BOTH)
+// If this increment reaches the max limit (5), it sets a 24-hour cooldown
 func (r *RedisClient) IncrementIPDailyLimit(ctx context.Context, ip string, incrementBy int) error {
 	key := fmt.Sprintf("ratelimit:ip:day:%s", ip)
-	pipe := r.client.Pipeline()
-	pipe.IncrBy(ctx, key, int64(incrementBy))
-	pipe.Expire(ctx, key, 24*time.Hour)
-	_, err := pipe.Exec(ctx)
-	return err
+
+	// Increment counter
+	newCount, err := r.client.IncrBy(ctx, key, int64(incrementBy)).Result()
+	if err != nil {
+		return err
+	}
+
+	// If we've reached the limit, set 24h cooldown
+	if newCount >= int64(r.maxDailyRequestsIP) {
+		cooldownKey := fmt.Sprintf("cooldown:ip:%s", ip)
+		cooldownEnd := time.Now().Add(24 * time.Hour)
+
+		pipe := r.client.Pipeline()
+		pipe.Set(ctx, cooldownKey, cooldownEnd.Format(time.RFC3339), 24*time.Hour)
+		pipe.Del(ctx, key) // Clear the counter since we're in cooldown now
+		_, err = pipe.Exec(ctx)
+		return err
+	}
+
+	// Set/refresh expiry on counter (in case cooldown wasn't triggered)
+	return r.client.Expire(ctx, key, 24*time.Hour).Err()
 }
 
 // CheckTokenHourlyThrottle checks if a specific token was requested in the last hour
@@ -121,12 +152,24 @@ func (r *RedisClient) SetTokenHourlyThrottle(ctx context.Context, ip, token stri
 	return r.client.Set(ctx, key, time.Now().Unix(), time.Hour).Err()
 }
 
-// GetIPDailyQuota returns current usage and remaining quota for an IP
-func (r *RedisClient) GetIPDailyQuota(ctx context.Context, ip string) (used, remaining int, err error) {
+// GetIPDailyQuota returns current usage, remaining quota, and cooldown end time for an IP
+func (r *RedisClient) GetIPDailyQuota(ctx context.Context, ip string) (used, remaining int, cooldownEnd *time.Time, err error) {
+	// Check if in cooldown
+	cooldownKey := fmt.Sprintf("cooldown:ip:%s", ip)
+	cooldownEndStr, err := r.client.Get(ctx, cooldownKey).Result()
+	if err == nil {
+		// Parse cooldown end time
+		endTime, parseErr := time.Parse(time.RFC3339, cooldownEndStr)
+		if parseErr == nil && time.Now().Before(endTime) {
+			return r.maxDailyRequestsIP, 0, &endTime, nil
+		}
+	}
+
+	// Not in cooldown, check current count
 	key := fmt.Sprintf("ratelimit:ip:day:%s", ip)
 	count, err := r.client.Get(ctx, key).Int()
 	if err != nil && err != redis.Nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	if err == redis.Nil {
 		count = 0
@@ -135,7 +178,7 @@ func (r *RedisClient) GetIPDailyQuota(ctx context.Context, ip string) (used, rem
 	if remaining < 0 {
 		remaining = 0
 	}
-	return count, remaining, nil
+	return count, remaining, nil, nil
 }
 
 

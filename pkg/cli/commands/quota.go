@@ -60,14 +60,27 @@ func runQuota(cmd *cobra.Command, args []string) error {
 	total := int(dailyLimit["total"].(float64))
 	used := int(dailyLimit["used"].(float64))
 	remaining := int(dailyLimit["remaining"].(float64))
+	inCooldown := dailyLimit["in_cooldown"].(bool)
 
 	fmt.Println("📊 DAILY QUOTA (Per IP)")
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Printf("  Used:      %d/%d requests\n", used, total)
 	fmt.Printf("  Remaining: %d requests\n", remaining)
 
-	if remaining == 0 {
-		fmt.Println("  ⚠️  Daily limit reached! Resets at midnight UTC")
+	if inCooldown {
+		if cooldownEndData := dailyLimit["cooldown_end"]; cooldownEndData != nil {
+			cooldownEndStr := cooldownEndData.(string)
+			if cooldownEnd, err := time.Parse(time.RFC3339, cooldownEndStr); err == nil {
+				hoursLeft := time.Until(cooldownEnd).Hours()
+				fmt.Printf("  🚫 IN 24-HOUR COOLDOWN (%.1f hours remaining)\n", hoursLeft)
+			} else {
+				fmt.Println("  🚫 IN 24-HOUR COOLDOWN")
+			}
+		} else {
+			fmt.Println("  🚫 IN 24-HOUR COOLDOWN")
+		}
+	} else if remaining == 0 {
+		fmt.Println("  ⚠️  Daily limit reached!")
 	} else if remaining <= 2 {
 		fmt.Printf("  ⚠️  Only %d request(s) left today\n", remaining)
 	}
@@ -127,7 +140,18 @@ func runQuota(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// Recommendations
-	if remaining > 0 {
+	if inCooldown {
+		if cooldownEndData := dailyLimit["cooldown_end"]; cooldownEndData != nil {
+			cooldownEndStr := cooldownEndData.(string)
+			if cooldownEnd, err := time.Parse(time.RFC3339, cooldownEndStr); err == nil {
+				fmt.Printf("💡 In 24h cooldown. Next request available at: %s\n", cooldownEnd.Format("Jan 02, 3:04 PM MST"))
+			} else {
+				fmt.Println("💡 In 24h cooldown after reaching daily limit")
+			}
+		} else {
+			fmt.Println("💡 In 24h cooldown after reaching daily limit")
+		}
+	} else if remaining > 0 {
 		if strkAvailable && ethAvailable {
 			fmt.Println("💡 You can request STRK or ETH tokens now")
 			if remaining >= 2 {
@@ -141,7 +165,7 @@ func runQuota(cmd *cobra.Command, args []string) error {
 			fmt.Println("💡 Both tokens throttled. Please wait before requesting")
 		}
 	} else {
-		fmt.Println("💡 Daily limit reached. Quota resets at midnight UTC")
+		fmt.Println("💡 Daily limit reached. Will enter 24h cooldown on next attempt")
 	}
 
 	fmt.Println()

@@ -128,9 +128,10 @@ func PrintInfoResponse(resp *models.InfoResponse) {
 	fmt.Println()
 
 	fmt.Println(bold("Distribution Limits:"))
-	fmt.Printf("  STRK per request:  %s STRK\n", resp.Limits.StrkPerRequest)
-	fmt.Printf("  ETH per request:   %s ETH\n", resp.Limits.EthPerRequest)
-	fmt.Printf("  Cooldown period:   %d hours\n", resp.Limits.CooldownHours)
+	fmt.Printf("  STRK per request:      %s STRK\n", resp.Limits.StrkPerRequest)
+	fmt.Printf("  ETH per request:       %s ETH\n", resp.Limits.EthPerRequest)
+	fmt.Printf("  Daily requests per IP: %d\n", resp.Limits.DailyRequestsPerIP)
+	fmt.Printf("  Token throttle:        %d hour per token\n", resp.Limits.TokenThrottleHours)
 	fmt.Println()
 
 	fmt.Println(bold("Proof of Work:"))
