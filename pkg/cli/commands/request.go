@@ -54,6 +54,11 @@ func runRequest(cmd *cobra.Command, args []string) error {
 	// Normalize token
 	token = strings.ToUpper(token)
 
+	// Handle "both" as token value
+	if token == "BOTH" {
+		both = true
+	}
+
 	// Validate token (if not requesting both)
 	if !both {
 		if err := utils.ValidateToken(token); err != nil {
