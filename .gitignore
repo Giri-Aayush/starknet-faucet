@@ -18,11 +18,12 @@ starknet-faucet
 # Account files (CONTAINS PRIVATE KEYS - NEVER PUSH!)
 account_info.txt
 new_account.txt
-scripts/*.txt
+new_secure_wallet.txt
 
-# Deployment scripts (may contain sensitive data)
-scripts/create_*.go
-scripts/deploy_*.go
+# Scripts folder (development only - not part of CLI)
+scripts/
+!scripts/install.js
+!scripts/generate_keys.sh
 
 # Captcha questions (Don't expose - defeats the purpose!)
 pkg/cli/captcha/questions.go
