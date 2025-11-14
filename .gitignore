@@ -20,6 +20,10 @@ account_info.txt
 new_account.txt
 scripts/*.txt
 
+# Deployment scripts (may contain sensitive data)
+scripts/create_*.go
+scripts/deploy_*.go
+
 # Captcha questions (Don't expose - defeats the purpose!)
 pkg/cli/captcha/questions.go
 
