@@ -120,50 +120,89 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check IP rate limit (hourly and daily per IP)
+	// NEW SIMPLIFIED RATE LIMITING
+
 	ip := c.IP()
-	canRequestIP, err := h.redis.CheckIPRateLimit(ctx, ip)
+
+	// 1. Check IP daily limit (5 requests/day)
+	canRequest, currentCount, err := h.redis.CheckIPDailyLimit(ctx, ip)
 	if err != nil {
-		h.logger.Error("Failed to check IP rate limit", zap.Error(err))
+		h.logger.Error("Failed to check IP daily limit", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
 			Error: "Failed to check rate limit",
 		})
 	}
-	if !canRequestIP {
+
+	// Calculate how many requests this will consume (1 for single token, 2 for BOTH)
+	requestCost := 1
+	if req.Token == "BOTH" {
+		requestCost = 2
+	}
+
+	// Check if there's enough quota
+	if !canRequest || (currentCount+requestCost) > h.config.MaxRequestsPerDayIP {
+		used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+		errorMsg := fmt.Sprintf("IP daily limit reached (%d/%d requests used). Resets at midnight UTC. Run 'starknet-faucet limits' for details.",
+			used, h.config.MaxRequestsPerDayIP)
 		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
-			Error: "IP rate limit exceeded. Please wait before making another request.",
+			Error: errorMsg,
 		})
 	}
 
-	// Check address rate limit (hourly and daily per address)
-	canRequestAddr, err := h.redis.CheckAddressRateLimit(ctx, req.Address)
-	if err != nil {
-		h.logger.Error("Failed to check address rate limit", zap.Error(err))
-		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
-			Error: "Failed to check rate limit",
-		})
-	}
-	if !canRequestAddr {
-		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
-			Error: "Address rate limit exceeded. Please wait before making another request.",
-		})
-	}
+	// 2. Check per-token hourly throttle
+	if req.Token == "BOTH" {
+		// For BOTH, check both STRK and ETH throttles
+		canRequestSTRK, nextSTRK, err := h.redis.CheckTokenHourlyThrottle(ctx, ip, "STRK")
+		if err != nil {
+			h.logger.Error("Failed to check STRK throttle", zap.Error(err))
+			return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+				Error: "Failed to check rate limit",
+			})
+		}
+		if !canRequestSTRK {
+			minutesRemaining := int(time.Until(*nextSTRK).Minutes())
+			used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+			errorMsg := fmt.Sprintf("STRK hourly throttle active. Next request in %d min. Daily quota: %d/%d used. Run 'starknet-faucet limits' for details.",
+				minutesRemaining, used, h.config.MaxRequestsPerDayIP)
+			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+				Error: errorMsg,
+			})
+		}
 
-	// Check address cooldown (optional additional check - can be removed if not needed)
-	inCooldown, nextRequestTime, err := h.redis.IsAddressInCooldown(ctx, req.Address)
-	if err != nil {
-		h.logger.Error("Failed to check address cooldown", zap.Error(err))
-		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
-			Error: "Failed to check cooldown",
-		})
-	}
-	if inCooldown {
-		remainingHours := time.Until(*nextRequestTime).Hours()
-		return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
-			Error:           "Address in cooldown period",
-			NextRequestTime: nextRequestTime,
-			RemainingHours:  &remainingHours,
-		})
+		canRequestETH, nextETH, err := h.redis.CheckTokenHourlyThrottle(ctx, ip, "ETH")
+		if err != nil {
+			h.logger.Error("Failed to check ETH throttle", zap.Error(err))
+			return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+				Error: "Failed to check rate limit",
+			})
+		}
+		if !canRequestETH {
+			minutesRemaining := int(time.Until(*nextETH).Minutes())
+			used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+			errorMsg := fmt.Sprintf("ETH hourly throttle active. Next request in %d min. Daily quota: %d/%d used. Run 'starknet-faucet limits' for details.",
+				minutesRemaining, used, h.config.MaxRequestsPerDayIP)
+			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+				Error: errorMsg,
+			})
+		}
+	} else {
+		// For single token, check that token's throttle
+		canRequestToken, nextAvailable, err := h.redis.CheckTokenHourlyThrottle(ctx, ip, req.Token)
+		if err != nil {
+			h.logger.Error("Failed to check token throttle", zap.Error(err), zap.String("token", req.Token))
+			return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+				Error: "Failed to check rate limit",
+			})
+		}
+		if !canRequestToken {
+			minutesRemaining := int(time.Until(*nextAvailable).Minutes())
+			used, _, _ := h.redis.GetIPDailyQuota(ctx, ip)
+			errorMsg := fmt.Sprintf("%s hourly throttle active. Next request in %d min. Daily quota: %d/%d used. Run 'starknet-faucet limits' for details.",
+				req.Token, minutesRemaining, used, h.config.MaxRequestsPerDayIP)
+			return c.Status(fiber.StatusTooManyRequests).JSON(models.ErrorResponse{
+				Error: errorMsg,
+			})
+		}
 	}
 
 	// Verify challenge exists
@@ -191,7 +230,12 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		h.logger.Error("Failed to delete challenge", zap.Error(err))
 	}
 
-	// Determine amount
+	// Handle BOTH token request
+	if req.Token == "BOTH" {
+		return h.handleBothTokensRequest(c, ctx, req, ip)
+	}
+
+	// Determine amount (single token)
 	var amountStr string
 	var amountFloat float64
 	var maxHourly, maxDaily float64
@@ -275,19 +319,14 @@ func (h *Handler) RequestTokens(c *fiber.Ctx) error {
 		})
 	}
 
-	// Increment IP rate limit counters
-	if err := h.redis.IncrementIPRateLimit(ctx, ip); err != nil {
-		h.logger.Error("Failed to increment IP rate limit", zap.Error(err))
+	// Increment IP daily counter (1 for single token)
+	if err := h.redis.IncrementIPDailyLimit(ctx, ip, 1); err != nil {
+		h.logger.Error("Failed to increment IP daily limit", zap.Error(err))
 	}
 
-	// Increment address rate limit counters
-	if err := h.redis.IncrementAddressRateLimit(ctx, req.Address); err != nil {
-		h.logger.Error("Failed to increment address rate limit", zap.Error(err))
-	}
-
-	// Set cooldown (optional - can be removed if using only hourly/daily limits)
-	if err := h.redis.SetAddressCooldown(ctx, req.Address); err != nil {
-		h.logger.Error("Failed to set cooldown", zap.Error(err))
+	// Set token hourly throttle (1 hour cooldown for this token)
+	if err := h.redis.SetTokenHourlyThrottle(ctx, ip, req.Token); err != nil {
+		h.logger.Error("Failed to set token throttle", zap.Error(err))
 	}
 
 	// Build response
@@ -322,27 +361,31 @@ func (h *Handler) GetStatus(c *fiber.Ctx) error {
 		})
 	}
 
-	// Check cooldown
-	inCooldown, nextRequestTime, err := h.redis.IsAddressInCooldown(ctx, address)
+	// Get IP from request (status endpoint doesn't have strict auth, just returns info)
+	ip := c.IP()
+
+	// Get IP daily quota
+	used, remaining, err := h.redis.GetIPDailyQuota(ctx, ip)
 	if err != nil {
-		h.logger.Error("Failed to check cooldown", zap.Error(err))
+		h.logger.Error("Failed to get IP daily quota", zap.Error(err))
 		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
 			Error: "Failed to check status",
 		})
 	}
 
+	canRequest := remaining > 0
+
 	response := models.StatusResponse{
 		Address:    address,
-		CanRequest: !inCooldown,
+		CanRequest: canRequest,
 	}
 
-	if inCooldown {
-		remainingHours := time.Until(*nextRequestTime).Hours()
-		lastRequest := nextRequestTime.Add(-time.Duration(h.config.CooldownHours) * time.Hour)
-		response.LastRequest = &lastRequest
-		response.NextRequestTime = nextRequestTime
-		response.RemainingHours = &remainingHours
-	}
+	h.logger.Info("Status check",
+		zap.String("address", address),
+		zap.String("ip", ip),
+		zap.Int("daily_quota_used", used),
+		zap.Int("daily_quota_remaining", remaining),
+	)
 
 	return c.JSON(response)
 }
@@ -379,7 +422,7 @@ func (h *Handler) GetInfo(c *fiber.Ctx) error {
 		Limits: models.LimitInfo{
 			StrkPerRequest: h.config.DripAmountSTRK,
 			EthPerRequest:  h.config.DripAmountETH,
-			CooldownHours:  h.config.CooldownHours,
+			CooldownHours:  0, // No longer used (simplified to IP daily + hourly throttle)
 		},
 		PoW: models.PoWInfo{
 			Enabled:    true,
@@ -388,6 +431,168 @@ func (h *Handler) GetInfo(c *fiber.Ctx) error {
 		FaucetBalance: models.BalanceInfo{
 			STRK: strkBalanceStr,
 			ETH:  ethBalanceStr,
+		},
+	}
+
+	return c.JSON(response)
+}
+
+// handleBothTokensRequest handles requests for both STRK and ETH tokens
+func (h *Handler) handleBothTokensRequest(c *fiber.Ctx, ctx context.Context, req models.FaucetRequest, ip string) error {
+	// Process both STRK and ETH
+	tokens := []string{"STRK", "ETH"}
+	var transactions []models.TransactionInfo
+	var failedToken string
+
+	for _, token := range tokens {
+		// Determine amount
+		var amountStr string
+		var amountFloat float64
+		var maxHourly, maxDaily float64
+		if token == "STRK" {
+			amountStr = h.config.DripAmountSTRK
+			amountFloat, _ = strconv.ParseFloat(amountStr, 64)
+			maxHourly = h.config.MaxTokensPerHourSTRK
+			maxDaily = h.config.MaxTokensPerDaySTRK
+		} else {
+			amountStr = h.config.DripAmountETH
+			amountFloat, _ = strconv.ParseFloat(amountStr, 64)
+			maxHourly = h.config.MaxTokensPerHourETH
+			maxDaily = h.config.MaxTokensPerDayETH
+		}
+
+		// Check global distribution limits
+		canDistribute, err := h.redis.TrackGlobalDistribution(ctx, token, amountFloat, maxHourly, maxDaily)
+		if err != nil {
+			h.logger.Error("Failed to check global distribution limits", zap.Error(err), zap.String("token", token))
+			failedToken = token
+			break
+		}
+		if !canDistribute {
+			h.logger.Warn("Global distribution limit reached", zap.String("token", token), zap.String("ip", ip))
+			failedToken = token
+			break
+		}
+
+		// Check minimum balance protection
+		currentBalance, err := h.starknet.GetBalance(ctx, h.config.FaucetAddress, token)
+		if err != nil {
+			h.logger.Error("Failed to check faucet balance", zap.Error(err), zap.String("token", token))
+			failedToken = token
+			break
+		}
+
+		amountWei := starknet.AmountToWei(amountFloat)
+		minBalancePct := float64(h.config.MinBalanceProtectPct) / 100.0
+		currentBalanceFloat := starknet.WeiToAmount(currentBalance)
+		minBalanceRequired := currentBalanceFloat * minBalancePct
+		balanceAfterTransfer := currentBalanceFloat - amountFloat
+
+		if balanceAfterTransfer < minBalanceRequired {
+			h.logger.Warn("Balance protection triggered", zap.String("token", token), zap.Float64("current_balance", currentBalanceFloat))
+			failedToken = token
+			break
+		}
+
+		// Transfer tokens
+		h.logger.Info("Transferring tokens", zap.String("recipient", req.Address), zap.String("token", token), zap.String("amount", amountStr))
+
+		txHash, err := h.starknet.TransferTokens(ctx, req.Address, token, amountWei)
+		if err != nil {
+			h.logger.Error("Failed to transfer tokens", zap.Error(err), zap.String("token", token))
+			failedToken = token
+			break
+		}
+
+		// Add to transactions list
+		transactions = append(transactions, models.TransactionInfo{
+			Token:       token,
+			Amount:      amountStr,
+			TxHash:      txHash,
+			ExplorerURL: h.config.GetExplorerURL(txHash),
+		})
+
+		h.logger.Info("Tokens sent successfully", zap.String("tx_hash", txHash), zap.String("token", token))
+	}
+
+	// If any token failed and we have partial success, still return success with what worked
+	if len(transactions) > 0 {
+		// Increment IP daily counter by 2 (BOTH = 1 STRK + 1 ETH)
+		if err := h.redis.IncrementIPDailyLimit(ctx, ip, 2); err != nil {
+			h.logger.Error("Failed to increment IP daily limit", zap.Error(err))
+		}
+
+		// Set hourly throttle for both tokens
+		for _, tx := range transactions {
+			if err := h.redis.SetTokenHourlyThrottle(ctx, ip, tx.Token); err != nil {
+				h.logger.Error("Failed to set token throttle", zap.Error(err), zap.String("token", tx.Token))
+			}
+		}
+
+		message := "Both tokens sent successfully"
+		if failedToken != "" {
+			message = fmt.Sprintf("Sent %d token(s) successfully, but %s failed", len(transactions), failedToken)
+		}
+
+		return c.JSON(models.FaucetResponse{
+			Success:      true,
+			Transactions: transactions,
+			Message:      message,
+		})
+	}
+
+	// If no transactions succeeded, return error
+	return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+		Error: fmt.Sprintf("Failed to send %s tokens. Please try again later.", failedToken),
+	})
+}
+
+// GetQuota returns the current rate limit quota for the requesting IP
+func (h *Handler) GetQuota(c *fiber.Ctx) error {
+	ctx := context.Background()
+	ip := c.IP()
+
+	// Get IP daily quota
+	used, remaining, err := h.redis.GetIPDailyQuota(ctx, ip)
+	if err != nil {
+		h.logger.Error("Failed to get IP daily quota", zap.Error(err))
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error: "Failed to get quota",
+		})
+	}
+
+	// Check token throttles
+	strkThrottled, strkNext, err := h.redis.CheckTokenHourlyThrottle(ctx, ip, "STRK")
+	if err != nil {
+		h.logger.Error("Failed to check STRK throttle", zap.Error(err))
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error: "Failed to check throttle",
+		})
+	}
+
+	ethThrottled, ethNext, err := h.redis.CheckTokenHourlyThrottle(ctx, ip, "ETH")
+	if err != nil {
+		h.logger.Error("Failed to check ETH throttle", zap.Error(err))
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error: "Failed to check throttle",
+		})
+	}
+
+	response := map[string]interface{}{
+		"daily_limit": map[string]interface{}{
+			"total":     h.config.MaxRequestsPerDayIP,
+			"used":      used,
+			"remaining": remaining,
+		},
+		"hourly_throttle": map[string]interface{}{
+			"strk": map[string]interface{}{
+				"available":        strkThrottled,
+				"next_request_at":  strkNext,
+			},
+			"eth": map[string]interface{}{
+				"available":       ethThrottled,
+				"next_request_at": ethNext,
+			},
 		},
 	}
 

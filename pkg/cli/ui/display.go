@@ -65,6 +65,24 @@ func NewSpinner(message string) *spinner.Spinner {
 // PrintFaucetResponse prints a nicely formatted faucet response
 func PrintFaucetResponse(resp *models.FaucetResponse) {
 	fmt.Println()
+
+	// Check if this is a BOTH token response (multiple transactions)
+	if len(resp.Transactions) > 0 {
+		fmt.Println(strings.Repeat("━", 50))
+		for _, tx := range resp.Transactions {
+			fmt.Printf("  %s:  %s %s\n", bold(tx.Token), tx.Amount, tx.Token)
+			fmt.Printf("  %s  %s\n", bold("TX Hash:"), shortenHash(tx.TxHash))
+			fmt.Printf("  🔗 %s\n", cyan(tx.ExplorerURL))
+			fmt.Println()
+		}
+		fmt.Println(strings.Repeat("━", 50))
+		fmt.Println()
+		PrintSuccess(resp.Message)
+		fmt.Println()
+		return
+	}
+
+	// Single token response (backwards compatible)
 	fmt.Println(strings.Repeat("━", 50))
 	fmt.Printf("  %s  %s %s\n", bold("Amount:"), resp.Amount, resp.Token)
 	fmt.Printf("  %s  %s\n", bold("TX Hash:"), shortenHash(resp.TxHash))

@@ -35,4 +35,7 @@ func SetupRoutes(app *fiber.App, handler *Handler) {
 
 	// Info endpoint
 	v1.Get("/info", handler.GetInfo)
+
+	// Quota endpoint
+	v1.Get("/quota", handler.GetQuota)
 }

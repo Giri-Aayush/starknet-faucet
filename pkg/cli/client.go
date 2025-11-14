@@ -143,3 +143,25 @@ func (c *APIClient) GetInfo() (*models.InfoResponse, error) {
 
 	return &response, nil
 }
+
+// Get performs a GET request to the specified path
+func (c *APIClient) Get(path string) ([]byte, error) {
+	var errResponse models.ErrorResponse
+
+	resp, err := c.client.R().
+		SetError(&errResponse).
+		Get(fmt.Sprintf("%s%s", c.baseURL, path))
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to GET %s: %w", path, err)
+	}
+
+	if resp.IsError() {
+		if errResponse.Error != "" {
+			return nil, fmt.Errorf("API error: %s", errResponse.Error)
+		}
+		return nil, fmt.Errorf("API returned status %d", resp.StatusCode())
+	}
+
+	return resp.Body(), nil
+}

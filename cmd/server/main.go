@@ -40,18 +40,17 @@ func main() {
 	logger.Info("Connecting to Redis...")
 	redis, err := cache.NewRedisClient(
 		cfg.RedisURL,
-		cfg.CooldownHours,
-		cfg.MaxRequestsPerHourIP,
 		cfg.MaxRequestsPerDayIP,
-		cfg.MaxRequestsPerHourAddress,
-		cfg.MaxRequestsPerDayAddress,
 		cfg.MaxChallengesPerHour,
 	)
 	if err != nil {
 		logger.Fatal("Failed to connect to Redis", zap.Error(err))
 	}
 	defer redis.Close()
-	logger.Info("Connected to Redis")
+	logger.Info("Connected to Redis",
+		zap.Int("max_requests_per_day_ip", cfg.MaxRequestsPerDayIP),
+		zap.Int("max_challenges_per_hour", cfg.MaxChallengesPerHour),
+	)
 
 	// Initialize Starknet client
 	logger.Info("Initializing Starknet client...")

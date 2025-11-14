@@ -19,16 +19,40 @@ var rootCmd = &cobra.Command{
 	Short: "Starknet Sepolia Testnet Faucet CLI",
 	Long: `A CLI tool to request testnet tokens (ETH and STRK) for Starknet Sepolia.
 
-Examples:
-  starknet-faucet request 0xYOUR_ADDRESS              # Request STRK tokens (default)
-  starknet-faucet request 0xYOUR_ADDRESS --token ETH  # Request ETH tokens
-  starknet-faucet request 0xYOUR_ADDRESS --both       # Request both ETH and STRK
-  starknet-faucet status 0xYOUR_ADDRESS               # Check cooldown status
-  starknet-faucet info                                # View faucet information
+Commands:
+  request <ADDRESS> [flags]  Request testnet tokens
+  quota                      Check YOUR remaining quota (how many requests left)
+  limits                     Show detailed rate limit rules
+  status <ADDRESS>           Check request status
+  info                       View faucet information
 
-The faucet uses Proof of Work and CAPTCHA to prevent abuse.
-Cooldown period: 24 hours per address.`,
-	Version: "1.0.11",
+Examples:
+  starknet-faucet request 0xYOUR_ADDRESS              # Request STRK tokens
+  starknet-faucet request 0xYOUR_ADDRESS --token ETH  # Request ETH tokens
+  starknet-faucet request 0xYOUR_ADDRESS --both       # Request both STRK and ETH
+  starknet-faucet quota                               # Check YOUR remaining quota
+  starknet-faucet limits                              # View rate limit rules
+  starknet-faucet status 0xYOUR_ADDRESS               # Check status
+
+Rate Limits (per IP):
+  Daily Limit:
+    • 5 requests per day
+    • Single token (STRK or ETH) = 1 request
+    • Both tokens (--both) = 2 requests
+
+  Hourly Throttle:
+    • 1 STRK request per hour
+    • 1 ETH request per hour
+    • Independent for each token
+
+  Run 'starknet-faucet limits' for detailed examples
+
+Security:
+  • Proof of Work challenge (prevents bot abuse)
+  • CAPTCHA verification (human check)
+
+Need help? Visit: https://github.com/Giri-Aayush/starknet-faucet`,
+	Version: "1.0.12",
 }
 
 // Execute runs the root command
@@ -49,4 +73,6 @@ func init() {
 	rootCmd.AddCommand(requestCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(infoCmd)
+	rootCmd.AddCommand(limitsCmd)
+	rootCmd.AddCommand(quotaCmd)
 }

@@ -11,16 +11,12 @@ import (
 // RedisClient wraps the Redis client with faucet-specific operations
 type RedisClient struct {
 	client                *redis.Client
-	cooldownHours         int
-	maxPerHourIP          int
-	maxPerDayIP           int
-	maxPerHourAddress     int
-	maxPerDayAddress      int
-	maxChallengesPerHour  int
+	maxDailyRequestsIP    int // Max requests per IP per day (5)
+	maxChallengesPerHour  int // Max PoW challenges per IP per hour (8)
 }
 
 // NewRedisClient creates a new Redis client
-func NewRedisClient(redisURL string, cooldownHours, maxPerHourIP, maxPerDayIP, maxPerHourAddress, maxPerDayAddress, maxChallengesPerHour int) (*RedisClient, error) {
+func NewRedisClient(redisURL string, maxDailyRequestsIP, maxChallengesPerHour int) (*RedisClient, error) {
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
@@ -38,11 +34,7 @@ func NewRedisClient(redisURL string, cooldownHours, maxPerHourIP, maxPerDayIP, m
 
 	return &RedisClient{
 		client:                client,
-		cooldownHours:         cooldownHours,
-		maxPerHourIP:          maxPerHourIP,
-		maxPerDayIP:           maxPerDayIP,
-		maxPerHourAddress:     maxPerHourAddress,
-		maxPerDayAddress:      maxPerDayAddress,
+		maxDailyRequestsIP:    maxDailyRequestsIP,
 		maxChallengesPerHour:  maxChallengesPerHour,
 	}, nil
 }
@@ -72,18 +64,36 @@ func (r *RedisClient) DeleteChallenge(ctx context.Context, challengeID string) e
 	return r.client.Del(ctx, key).Err()
 }
 
-// Cooldown-related operations
+// New Simplified Rate Limiting Operations
 
-// SetAddressCooldown sets the cooldown period for an address
-func (r *RedisClient) SetAddressCooldown(ctx context.Context, address string) error {
-	key := fmt.Sprintf("cooldown:address:%s", address)
-	ttl := time.Duration(r.cooldownHours) * time.Hour
-	return r.client.Set(ctx, key, time.Now().Unix(), ttl).Err()
+// CheckIPDailyLimit checks if IP has exceeded daily request limit (5/day)
+// Returns (canRequest, currentCount, error)
+func (r *RedisClient) CheckIPDailyLimit(ctx context.Context, ip string) (bool, int, error) {
+	key := fmt.Sprintf("ratelimit:ip:day:%s", ip)
+	count, err := r.client.Get(ctx, key).Int()
+	if err != nil && err != redis.Nil {
+		return false, 0, err
+	}
+	if count >= r.maxDailyRequestsIP {
+		return false, count, nil
+	}
+	return true, count, nil
 }
 
-// IsAddressInCooldown checks if an address is in cooldown
-func (r *RedisClient) IsAddressInCooldown(ctx context.Context, address string) (bool, *time.Time, error) {
-	key := fmt.Sprintf("cooldown:address:%s", address)
+// IncrementIPDailyLimit increments IP daily counter by specified amount (1 for single token, 2 for BOTH)
+func (r *RedisClient) IncrementIPDailyLimit(ctx context.Context, ip string, incrementBy int) error {
+	key := fmt.Sprintf("ratelimit:ip:day:%s", ip)
+	pipe := r.client.Pipeline()
+	pipe.IncrBy(ctx, key, int64(incrementBy))
+	pipe.Expire(ctx, key, 24*time.Hour)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// CheckTokenHourlyThrottle checks if a specific token was requested in the last hour
+// Returns (canRequest, nextAvailableTime, error)
+func (r *RedisClient) CheckTokenHourlyThrottle(ctx context.Context, ip, token string) (bool, *time.Time, error) {
+	key := fmt.Sprintf("throttle:ip:token:%s:%s", ip, token)
 
 	// Check if key exists
 	exists, err := r.client.Exists(ctx, key).Result()
@@ -92,106 +102,42 @@ func (r *RedisClient) IsAddressInCooldown(ctx context.Context, address string) (
 	}
 
 	if exists == 0 {
-		return false, nil, nil
+		return true, nil, nil // No throttle active
 	}
 
-	// Get TTL
+	// Get TTL to calculate when next request is available
 	ttl, err := r.client.TTL(ctx, key).Result()
 	if err != nil {
 		return false, nil, err
 	}
 
-	// Calculate next request time
-	nextRequestTime := time.Now().Add(ttl)
-
-	return true, &nextRequestTime, nil
+	nextAvailable := time.Now().Add(ttl)
+	return false, &nextAvailable, nil
 }
 
-// Rate limiting operations
+// SetTokenHourlyThrottle sets hourly throttle for a token (1 hour cooldown)
+func (r *RedisClient) SetTokenHourlyThrottle(ctx context.Context, ip, token string) error {
+	key := fmt.Sprintf("throttle:ip:token:%s:%s", ip, token)
+	return r.client.Set(ctx, key, time.Now().Unix(), time.Hour).Err()
+}
 
-// CheckAddressRateLimit checks if an address has exceeded rate limits
-func (r *RedisClient) CheckAddressRateLimit(ctx context.Context, address string) (bool, error) {
-	// Check hourly limit
-	hourlyKey := fmt.Sprintf("ratelimit:address:hour:%s", address)
-	hourlyCount, err := r.client.Get(ctx, hourlyKey).Int()
+// GetIPDailyQuota returns current usage and remaining quota for an IP
+func (r *RedisClient) GetIPDailyQuota(ctx context.Context, ip string) (used, remaining int, err error) {
+	key := fmt.Sprintf("ratelimit:ip:day:%s", ip)
+	count, err := r.client.Get(ctx, key).Int()
 	if err != nil && err != redis.Nil {
-		return false, err
+		return 0, 0, err
 	}
-	if hourlyCount >= r.maxPerHourAddress {
-		return false, nil
+	if err == redis.Nil {
+		count = 0
 	}
-
-	// Check daily limit
-	dailyKey := fmt.Sprintf("ratelimit:address:day:%s", address)
-	dailyCount, err := r.client.Get(ctx, dailyKey).Int()
-	if err != nil && err != redis.Nil {
-		return false, err
+	remaining = r.maxDailyRequestsIP - count
+	if remaining < 0 {
+		remaining = 0
 	}
-	if dailyCount >= r.maxPerDayAddress {
-		return false, nil
-	}
-
-	return true, nil
+	return count, remaining, nil
 }
 
-// IncrementAddressRateLimit increments the rate limit counters for an address
-func (r *RedisClient) IncrementAddressRateLimit(ctx context.Context, address string) error {
-	// Increment hourly counter
-	hourlyKey := fmt.Sprintf("ratelimit:address:hour:%s", address)
-	pipe := r.client.Pipeline()
-	pipe.Incr(ctx, hourlyKey)
-	pipe.Expire(ctx, hourlyKey, time.Hour)
-
-	// Increment daily counter
-	dailyKey := fmt.Sprintf("ratelimit:address:day:%s", address)
-	pipe.Incr(ctx, dailyKey)
-	pipe.Expire(ctx, dailyKey, 24*time.Hour)
-
-	_, err := pipe.Exec(ctx)
-	return err
-}
-
-// CheckIPRateLimit checks if an IP has exceeded rate limits
-func (r *RedisClient) CheckIPRateLimit(ctx context.Context, ip string) (bool, error) {
-	// Check hourly limit
-	hourlyKey := fmt.Sprintf("ratelimit:ip:hour:%s", ip)
-	hourlyCount, err := r.client.Get(ctx, hourlyKey).Int()
-	if err != nil && err != redis.Nil {
-		return false, err
-	}
-	if hourlyCount >= r.maxPerHourIP {
-		return false, nil
-	}
-
-	// Check daily limit
-	dailyKey := fmt.Sprintf("ratelimit:ip:day:%s", ip)
-	dailyCount, err := r.client.Get(ctx, dailyKey).Int()
-	if err != nil && err != redis.Nil {
-		return false, err
-	}
-	if dailyCount >= r.maxPerDayIP {
-		return false, nil
-	}
-
-	return true, nil
-}
-
-// IncrementIPRateLimit increments the rate limit counters for an IP (deprecated, kept for backwards compatibility)
-func (r *RedisClient) IncrementIPRateLimit(ctx context.Context, ip string) error {
-	// Increment hourly counter
-	hourlyKey := fmt.Sprintf("ratelimit:ip:hour:%s", ip)
-	pipe := r.client.Pipeline()
-	pipe.Incr(ctx, hourlyKey)
-	pipe.Expire(ctx, hourlyKey, time.Hour)
-
-	// Increment daily counter
-	dailyKey := fmt.Sprintf("ratelimit:ip:day:%s", ip)
-	pipe.Incr(ctx, dailyKey)
-	pipe.Expire(ctx, dailyKey, 24*time.Hour)
-
-	_, err := pipe.Exec(ctx)
-	return err
-}
 
 // Global distribution tracking (anti-drain protection)
 
@@ -289,6 +235,7 @@ func (r *RedisClient) IncrementChallengeRateLimit(ctx context.Context, ip string
 	_, err := pipe.Exec(ctx)
 	return err
 }
+
 
 // Health check
 

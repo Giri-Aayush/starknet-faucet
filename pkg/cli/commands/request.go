@@ -25,15 +25,32 @@ var requestCmd = &cobra.Command{
 	Short: "Request testnet tokens",
 	Long: `Request testnet tokens (ETH or STRK) for a Starknet address.
 
+The faucet distributes:
+  • 10 STRK per request
+  • 0.01 ETH per request
+
+Rate Limits:
+  Individual tokens: 2/hour, 3/day per token
+  Both tokens:       1/day (24-hour cooldown)
+
 Examples:
-  # Request STRK tokens
-  starknet-faucet request 0x0742...8d9f --token STRK
+  # Request STRK tokens (default)
+  starknet-faucet request 0x0742...8d9f
 
   # Request ETH tokens
   starknet-faucet request 0x0742...8d9f --token ETH
 
-  # Request both ETH and STRK
-  starknet-faucet request 0x0742...8d9f --both`,
+  # Request both tokens (10 STRK + 0.01 ETH in single transaction)
+  starknet-faucet request 0x0742...8d9f --both
+  starknet-faucet request 0x0742...8d9f --token both
+
+Security:
+  Each request requires:
+  • Proof of Work challenge (computational work)
+  • CAPTCHA verification (human check)
+
+Note: Using --both counts toward your individual token limits
+      AND sets a 24-hour cooldown for --both requests.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRequest,
 }

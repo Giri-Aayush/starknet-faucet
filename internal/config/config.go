@@ -27,25 +27,19 @@ type Config struct {
 
 	// Faucet Settings
 	PoWDifficulty   int
-	CooldownHours   int
 	DripAmountSTRK  string
 	DripAmountETH   string
 	ChallengeTTL    int // in seconds
 
-	// Rate Limiting - Per IP
-	MaxRequestsPerHourIP int
-	MaxRequestsPerDayIP  int
-
-	// Rate Limiting - Per Address
-	MaxRequestsPerHourAddress int
-	MaxRequestsPerDayAddress  int
+	// Rate Limiting (Simplified)
+	MaxRequestsPerDayIP  int // Max requests per IP per day (5) - single token=1, BOTH=2
+	MaxChallengesPerHour int // Max PoW challenges per IP per hour (8)
 
 	// Global Distribution Limits (prevents drain attacks)
 	MaxTokensPerHourSTRK  float64 // Max STRK distributed per hour globally
 	MaxTokensPerDaySTRK   float64 // Max STRK per day globally
 	MaxTokensPerHourETH   float64 // Max ETH distributed per hour globally
 	MaxTokensPerDayETH    float64 // Max ETH per day globally
-	MaxChallengesPerHour  int     // Max challenge requests per IP per hour
 	MinBalanceProtectPct  int     // Stop distributing when balance drops to this % (e.g., 20 = stop at 20%)
 }
 
@@ -74,26 +68,20 @@ func Load() (*Config, error) {
 
 		// Faucet settings
 		PoWDifficulty:  getEnvAsInt("POW_DIFFICULTY", 4),
-		CooldownHours:  getEnvAsInt("COOLDOWN_HOURS", 24),
 		DripAmountSTRK: getEnv("DRIP_AMOUNT_STRK", "10"),
 		DripAmountETH:  getEnv("DRIP_AMOUNT_ETH", "0.01"),
 		ChallengeTTL:   getEnvAsInt("CHALLENGE_TTL", 300), // 5 minutes
 
-		// Rate limiting - Per IP (more lenient, one person may have multiple addresses)
-		MaxRequestsPerHourIP: getEnvAsInt("MAX_REQUESTS_PER_HOUR_IP", 10),
-		MaxRequestsPerDayIP:  getEnvAsInt("MAX_REQUESTS_PER_DAY_IP", 20),
-
-		// Rate limiting - Per Address (stricter, one address shouldn't need frequent refills)
-		MaxRequestsPerHourAddress: getEnvAsInt("MAX_REQUESTS_PER_HOUR_ADDRESS", 2),
-		MaxRequestsPerDayAddress:  getEnvAsInt("MAX_REQUESTS_PER_DAY_ADDRESS", 5),
+		// Rate limiting (simplified)
+		MaxRequestsPerDayIP:  getEnvAsInt("MAX_REQUESTS_PER_DAY_IP", 5), // 5 requests/day per IP
+		MaxChallengesPerHour: getEnvAsInt("MAX_CHALLENGES_PER_HOUR", 8), // 8 challenges/hour per IP
 
 		// Global distribution limits (anti-drain protection) - set to 0 to disable
 		MaxTokensPerHourSTRK: getEnvAsFloat("MAX_TOKENS_PER_HOUR_STRK", 0), // 0 = disabled
 		MaxTokensPerDaySTRK:  getEnvAsFloat("MAX_TOKENS_PER_DAY_STRK", 0),  // 0 = disabled
 		MaxTokensPerHourETH:  getEnvAsFloat("MAX_TOKENS_PER_HOUR_ETH", 0),  // 0 = disabled
-		MaxTokensPerDayETH:   getEnvAsFloat("MAX_TOKENS_PER_DAY_ETH", 0),    // 0 = disabled
-		MaxChallengesPerHour: getEnvAsInt("MAX_CHALLENGES_PER_HOUR", 10),       // Max 10 challenge requests/hour/IP
-		MinBalanceProtectPct: getEnvAsInt("MIN_BALANCE_PROTECT_PCT", 5),       // Stop at 5% remaining
+		MaxTokensPerDayETH:   getEnvAsFloat("MAX_TOKENS_PER_DAY_ETH", 0),   // 0 = disabled
+		MinBalanceProtectPct: getEnvAsInt("MIN_BALANCE_PROTECT_PCT", 5),    // Stop at 5% remaining
 	}
 
 	// Validate required fields

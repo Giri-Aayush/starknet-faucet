@@ -15,19 +15,28 @@ type ChallengeResponse struct {
 // FaucetRequest represents a request for tokens from the faucet
 type FaucetRequest struct {
 	Address     string `json:"address" validate:"required"`
-	Token       string `json:"token" validate:"required,oneof=ETH STRK"`
+	Token       string `json:"token" validate:"required,oneof=ETH STRK BOTH"`
 	ChallengeID string `json:"challenge_id" validate:"required"`
 	Nonce       int64  `json:"nonce" validate:"required"`
 }
 
 // FaucetResponse represents the successful response from a faucet request
 type FaucetResponse struct {
-	Success     bool   `json:"success"`
-	TxHash      string `json:"tx_hash"`
-	Amount      string `json:"amount"`
+	Success      bool               `json:"success"`
+	TxHash       string             `json:"tx_hash,omitempty"`        // Single token transaction
+	Amount       string             `json:"amount,omitempty"`         // Single token amount
+	Token        string             `json:"token,omitempty"`          // Single token type
+	ExplorerURL  string             `json:"explorer_url,omitempty"`   // Single token explorer URL
+	Message      string             `json:"message"`
+	Transactions []TransactionInfo  `json:"transactions,omitempty"`   // Multiple tokens (when token=BOTH)
+}
+
+// TransactionInfo represents info about a single token transfer
+type TransactionInfo struct {
 	Token       string `json:"token"`
+	Amount      string `json:"amount"`
+	TxHash      string `json:"tx_hash"`
 	ExplorerURL string `json:"explorer_url"`
-	Message     string `json:"message"`
 }
 
 // ErrorResponse represents an error response
