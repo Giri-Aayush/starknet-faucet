@@ -1,551 +1,333 @@
-# Security Analysis - Starknet Faucet
+# Security Notes
 
-## Question: "Can attackers exploit the hardcoded API URL?"
+Someone asked if having the API URL hardcoded in the CLI is a security risk. Short answer: no. Let me explain why.
 
-**Short Answer:** No. The URL being public is not a security vulnerability.
+## The URL Being Public is Fine
 
----
+The API URL (`https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app`) is in the CLI source code on GitHub. Anyone can see it. That's not a problem.
 
-## Why Public URLs Are Safe
+Think about it - your frontend also calls this API. It's right there in the browser dev tools. The URL being public is inherent to how HTTP APIs work.
 
-### 1. **Your API is MEANT to be public**
-- Users need to access it from CLI
-- Frontend needs to fetch data
-- It's a faucet service, not a private API
-- Hiding the URL provides no security benefit
+Security through obscurity doesn't work. If your security relies on the URL being secret, you don't have security.
 
-### 2. **Security is in the backend, not in obscurity**
+## How It Actually Works
 
-```
-❌ Bad Security:  Hide the URL, hope no one finds it
-✅ Good Security: Public URL + Rate limiting + PoW + Validation
-```
+The backend has multiple layers of protection. An attacker knowing the URL doesn't help them because:
 
----
+### 1. IP Rate Limiting
 
-## Your Defense Layers
+Each IP can make 5 requests per day. After the 5th request, you're locked out for 24 hours.
 
-### Layer 1: IP-Based Rate Limiting ⏱️
-
-**Location:** `internal/api/handlers.go` line 125-160
-
-**How it works:**
-```
-IP: 203.0.113.45
-├─ Request 1: ✓ (1/5 used)
-├─ Request 2: ✓ (2/5 used)
-├─ Request 3: ✓ (3/5 used)
-├─ Request 4: ✓ (4/5 used)
-├─ Request 5: ✓ (5/5 used)
-└─ Request 6: ✗ 24-hour cooldown activated
-```
-
-**Attack resistance:**
-- Attacker can make max 5 requests per IP per day
-- After 5th request: 24-hour lockout
-- Stored in Redis (persists across server restarts)
-
-**Cost to bypass:**
-- Attacker needs new IP for every 5 requests
-- VPNs/proxies cost money or get rate-limited too
-- Not economical for worthless testnet tokens
-
----
-
-### Layer 2: Per-Token Hourly Throttle ⏲️
-
-**Location:** `internal/api/handlers.go` line 162-216
-
-**How it works:**
-```
-IP requests STRK at 10:00 AM
-├─ 10:00 AM: ✓ STRK sent
-├─ 10:30 AM: ✗ Throttled (30 min remaining)
-├─ 11:00 AM: ✓ STRK available again
-└─ 11:05 AM: ✗ Throttled (55 min remaining)
-```
-
-**Why this matters:**
-- Even if attacker has 5 requests/day quota
-- Can only request same token once per hour
-- Max 5 tokens per day (not 5 per hour)
-
----
-
-### Layer 3: Proof of Work (PoW) 💪
-
-**Location:** `internal/api/handlers.go` line 218-236
-
-**How it works:**
-```
-1. User requests challenge from backend
-   Backend: "Find nonce where SHA256(challenge+nonce) starts with 6 zeros"
-
-2. User's computer works (20-60 seconds CPU time)
-   Try nonce=0: hash=0x8a3f... ✗ (only 2 zeros)
-   Try nonce=1: hash=0x5b2c... ✗ (only 3 zeros)
-   ...
-   Try nonce=800047: hash=0x000000a1... ✓ (6 zeros!)
-
-3. User submits: {challenge_id, nonce: 800047}
-
-4. Backend verifies:
-   ✓ Challenge exists in Redis?
-   ✓ SHA256(challenge+800047) starts with 6 zeros?
-   ✓ Challenge not already used?
-```
-
-**Attack resistance:**
-- Each request requires ~30 seconds of CPU work
-- Attacker can't pre-compute (challenges expire in 5 min)
-- Attacker can't skip (backend verifies solution)
-- Attacker can't reuse (challenges deleted after use)
-
-**DDoS protection:**
-- Attacker's CPU does the work, not your server
-- Rate limiting still applies (max 5 requests/day)
-- Cost: 5 requests × 30s = 2.5 minutes CPU time for 50 STRK testnet tokens
-
----
-
-### Layer 4: Challenge Expiry ⏳
-
-**Location:** `internal/cache/redis.go`
-
-**How it works:**
-```
-Time   Event
-10:00  User gets challenge (expires at 10:05)
-10:02  User solves PoW (nonce: 123456)
-10:03  User submits request ✓
-10:03  Challenge deleted from Redis (can't reuse)
-
-OR
-
-10:00  User gets challenge (expires at 10:05)
-10:02  User solves PoW (nonce: 123456)
-10:06  User submits request ✗ (challenge expired)
-```
-
-**Attack resistance:**
-- Challenges expire after 5 minutes
-- Can't pre-solve thousands of challenges
-- Can't reuse solved challenges
-
----
-
-### Layer 5: Address Validation ✅
-
-**Location:** `internal/api/handlers.go` line 108-113
-
-**How it works:**
 ```go
-// Validate address format
+// internal/api/handlers.go:128
+canRequest, currentCount, cooldownEnd := h.redis.CheckIPDailyLimit(ctx, ip)
+if !canRequest && cooldownEnd != nil {
+    return c.Status(429).JSON(...)
+}
+```
+
+This is stored in Redis, so it persists across server restarts.
+
+Could an attacker use a VPN to get new IPs? Sure, but:
+- Each IP still limited to 5 requests
+- That's 50 STRK (worth $0 on testnet)
+- Costs them VPN fees or bot time
+- Not economically viable
+
+### 2. Token Throttling
+
+Even if you have quota left, you can only request the same token once per hour.
+
+```go
+// internal/api/handlers.go:200
+canRequestToken, nextAvailable := h.redis.CheckTokenHourlyThrottle(ctx, ip, req.Token)
+if !canRequestToken {
+    minutesRemaining := int(time.Until(*nextAvailable).Minutes())
+    return c.Status(429).JSON(...)
+}
+```
+
+So your 5 daily requests are spread out. Can't just spam 5 STRK requests in a row.
+
+### 3. Proof of Work
+
+This is the main anti-spam mechanism. Before you can request tokens, you need to:
+
+1. Get a challenge from the server
+2. Find a nonce where `SHA256(challenge + nonce)` starts with 6 zeros
+3. Submit the nonce as proof you did the work
+
+On average this takes 20-60 seconds of CPU time. The user's computer does this work, not the server.
+
+```go
+// internal/api/handlers.go:227
+if !h.powGenerator.VerifyPoW(storedChallenge, req.Nonce, h.config.PoWDifficulty) {
+    return c.Status(400).JSON(models.ErrorResponse{
+        Error: "Invalid proof of work solution",
+    })
+}
+```
+
+Can someone skip this by modifying the CLI? Doesn't matter - the backend validates the solution. If you submit a random nonce, the math won't check out.
+
+Could someone pre-solve a bunch of challenges? No - they expire after 5 minutes.
+
+### 4. Challenge One-Time Use
+
+After you use a challenge, it's deleted from Redis:
+
+```go
+// internal/api/handlers.go:239
+if err := h.redis.DeleteChallenge(ctx, req.ChallengeID); err != nil {
+    h.logger.Error("Failed to delete challenge", zap.Error(err))
+}
+```
+
+So you can't reuse the same solution. Each request needs a fresh PoW solve.
+
+### 5. Address and Token Validation
+
+Basic input validation to prevent garbage data:
+
+```go
+// internal/api/handlers.go:109
 if err := utils.ValidateStarknetAddress(req.Address); err != nil {
-    return 400 Bad Request "Invalid address"
+    return c.Status(400).JSON(...)
 }
-```
 
-**Prevents:**
-- Malformed addresses
-- SQL injection attempts (if you had a DB)
-- Random garbage data
-
----
-
-### Layer 6: Token Validation ✅
-
-**Location:** `internal/api/handlers.go` line 115-121
-
-**How it works:**
-```go
-// Only allow: "STRK", "ETH", "BOTH"
+// internal/api/handlers.go:117
 if err := utils.ValidateToken(req.Token); err != nil {
-    return 400 Bad Request "Invalid token"
+    return c.Status(400).JSON(...)
 }
 ```
 
-**Prevents:**
-- Requests for non-existent tokens
-- Injection attacks via token field
+## What About CORS?
 
----
+The backend has CORS set to allow all origins:
 
-### Layer 7: CORS Configuration 🌐
-
-**Location:** `internal/api/routes.go` line 15-21
-
-**Current config:**
 ```go
-AllowOrigins: "*",  // Allow all domains
+// internal/api/routes.go:18
+AllowOrigins: "*",
 ```
 
-**Why this is OK:**
-- Public API meant to be accessed from anywhere
-- CLI (users' machines) need access
-- Frontend (your website) needs access
-- Third-party tools can integrate
-- No sensitive data exposed
+This is correct for a public API. The frontend needs to call it from browsers. The CLI calls it from users' machines (various IPs). Third-party tools might want to integrate.
 
-**When to restrict:**
-- If you add admin endpoints
-- If you add authentication
-- If you expose private keys (NEVER do this!)
+If this was a private API with authentication, you'd restrict it. But for a public faucet, `*` is the right choice.
 
-**Alternative (more restrictive):**
-```go
-// If you want to only allow specific domains
-AllowOrigins: "https://yourwebsite.com, https://localhost:3000",
-```
+## Attack Scenarios
 
-But this would break CLI usage (comes from random IPs/domains).
+Let me walk through what happens if someone tries to abuse this.
 
----
+### Scenario: Simple spam script
 
-### Layer 8: Backend Environment Security 🔐
-
-**What's protected:**
+Attacker writes:
 ```bash
-# These are SECRET (only on Koyeb server)
-FAUCET_PRIVATE_KEY=0x5f7c...  # ← NEVER in Git!
-REDIS_URL=redis://...         # ← NEVER in Git!
-STARKNET_RPC_URL=https://...  # ← API key in URL
-
-# These are PUBLIC (in CLI code)
-API_URL=https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app  # ✓ OK to be public
-```
-
-**Verified safe:**
-```bash
-$ git log --all --pretty=format: --name-only -- '.env*' | sort -u
-.env.example  # ✓ Only example file in Git
-
-$ grep -r "FAUCET_PRIVATE_KEY" --exclude-dir=.git
-# Only references to env variable, not actual key ✓
-```
-
----
-
-## Attack Scenarios & Outcomes
-
-### Scenario 1: Script Kiddie Spam Attack
-
-**Attack:**
-```bash
-# Attacker writes simple script
 while true; do
-  curl POST https://...koyeb.app/api/v1/request \
+  curl -X POST https://...koyeb.app/api/v1/request \
+    -H "Content-Type: application/json" \
     -d '{"address":"0xATTACKER","token":"STRK"}'
 done
 ```
 
-**What happens:**
-1. ❌ No challenge_id provided → 400 Bad Request
-2. Even if they get challenge:
-   - ❌ Must solve PoW (~30s each)
-   - ❌ Rate limit: 5 requests max
-   - ❌ 24-hour cooldown after 5th request
-3. **Result:** Attacker gets 50 STRK (5 requests × 10 STRK) worth $0 (testnet)
-4. **Cost to attacker:** 2.5 minutes CPU time + VPN costs
+What happens:
+- No `challenge_id` provided → 400 Bad Request
+- Even if they get a challenge, they need to solve PoW (~30s each)
+- Rate limit: max 5 requests from their IP
+- After 5th request: 24-hour lockout
 
-**Verdict:** Not economically viable ✓
+Result: They get 50 STRK (worth $0 on testnet) and waste 2.5 minutes of CPU time.
 
----
+### Scenario: Distributed attack
 
-### Scenario 2: Distributed Attack (Many IPs)
+Attacker uses a botnet with 100 IPs. Each makes 5 requests.
 
-**Attack:**
-```bash
-# Attacker uses botnet with 100 IPs
-# Each IP makes 5 requests = 500 total requests
-```
+What happens:
+- 500 requests total
+- Each requires ~30s of PoW solving
+- Total CPU time: 4.2 hours across the botnet
+- Drains: 5,000 STRK from faucet
 
-**What happens:**
-1. Each IP must solve PoW: 500 × 30s = 4.2 hours total CPU time
-2. Drains faucet: 500 × 10 STRK = 5,000 STRK
-3. Your faucet balance: 3,740 STRK
-4. After ~374 requests, faucet is empty
+Faucet currently has ~3,740 STRK, so after ~374 requests it's empty and stops working. That's annoying but not catastrophic - the server doesn't crash, it just runs out of tokens.
 
-**Your defenses:**
-- Monitor logs for unusual patterns
-- Set balance threshold alert
-- Increase PoW difficulty if needed (difficulty 6 → 8)
-- Ban specific addresses if needed
-- Faucet runs out, stops working (not a server crash)
+In practice, I'd notice this in the logs and could:
+- Increase PoW difficulty (6 → 8 makes it ~4x harder)
+- Ban specific addresses
+- Add address-based rate limiting (in addition to IP)
 
-**Verdict:** Possible but expensive for attacker, low-value target ✓
+But again - testnet tokens are worthless. Not a realistic attack scenario.
 
----
+### Scenario: Replay attack
 
-### Scenario 3: Man-in-the-Middle (MITM)
+Attacker captures a valid request and tries to replay it:
 
-**Attack:**
-```
-User → Attacker intercepts → Fake server
-```
-
-**Your defenses:**
-- ✅ HTTPS encryption (SSL/TLS)
-- ✅ Certificate validation
-- ✅ User's browser/CLI verifies cert
-
-**Outcome:**
-- Attacker can't intercept without breaking HTTPS
-- Modern browsers/OS block invalid certs
-
-**Verdict:** Protected by HTTPS ✓
-
----
-
-### Scenario 4: Replay Attack
-
-**Attack:**
-```bash
-# Attacker captures valid request:
-POST /api/v1/request
+```json
 {
-  "address": "0x123...",
   "challenge_id": "abc123",
-  "nonce": 800047
+  "nonce": 800047,
+  "address": "0x123...",
+  "token": "STRK"
 }
-
-# Tries to replay it 100 times
 ```
 
-**Your defenses:**
-```go
-// Challenge deleted after first use
-h.redis.DeleteChallenge(ctx, req.ChallengeID)
+What happens:
+- 1st attempt: ✓ Works
+- 2nd attempt: ✗ Challenge deleted (400 error)
+- 3rd+ attempts: ✗ Challenge not found
+
+Challenges are one-time use, so replays don't work.
+
+### Scenario: Man-in-the-middle
+
+Attacker tries to intercept requests between CLI and backend.
+
+What happens:
+- Connection is HTTPS (encrypted)
+- Browser/CLI validates SSL certificate
+- Attacker can't read or modify traffic without breaking HTTPS
+- Modern OS/browsers block invalid certs
+
+MITM isn't possible without compromising the user's machine (at which point you have bigger problems).
+
+## What's Actually Secret
+
+These values are stored in Koyeb environment variables (not in code):
+
+```bash
+FAUCET_PRIVATE_KEY=0x5f7c...  # ← This would be really bad to leak
+REDIS_URL=redis://...         # ← Contains password
+STARKNET_RPC_URL=https://...  # ← Contains Alchemy API key
 ```
 
-**Outcome:**
-- 1st request: ✓ Success
-- 2nd request: ✗ Challenge not found (deleted)
-- 3rd+ requests: ✗ Challenge not found
+I've verified these aren't in the Git history:
 
-**Verdict:** Protected by one-time challenges ✓
+```bash
+$ git log --all --pretty=format: --name-only -- '.env*' | sort -u
+.env.example  # ✓ Only the example file (no real secrets)
 
----
-
-### Scenario 5: Frontend Domain Spoofing
-
-**Attack:**
-```
-Attacker creates: fake-starknet-faucet.com
-Attacker's site calls your API
+$ grep -r "0x5f7c" .
+# No matches (good - means private key not in code)
 ```
 
-**Your current CORS:**
-```go
-AllowOrigins: "*"  // Allows all domains
-```
-
-**What happens:**
-- ✓ Attacker's site CAN call your API
-- ✓ But still subject to all rate limits
-- ✓ Can't bypass PoW
-- ✓ Can't bypass IP limits
-- ✓ User gets real tokens from your faucet
-
-**Is this a problem?**
-- No! Your API is meant to be public
-- Attacker can't drain faucet (rate limits)
-- Attacker can't steal keys (not exposed)
-- It's like someone embedding Google Maps on their site
-
-**Verdict:** Not a vulnerability ✓
-
----
+The Alchemy API key being in the URL is a bit awkward (Alchemy's API design), but it's fine since:
+- It's only in backend environment variables
+- Backend doesn't expose it in API responses
+- It's not in the CLI code or frontend
 
 ## What You Should NOT Do
 
-### ❌ DON'T: Add API Keys/Auth for Users
+**Don't add authentication to the faucet API**
 
-```go
-// BAD IDEA:
-if req.ApiKey != "secret123" {
-    return 401 Unauthorized
-}
-```
+I've seen faucets that require an API key or OAuth. This doesn't help:
+- Key would be in CLI source (public on GitHub)
+- Adds friction for users
+- Doesn't prevent the attacks described above
 
-**Why not:**
-- API key would be in CLI code (public on GitHub)
-- Attacker reads code, copies API key
+**Don't obfuscate the API URL**
+
+Some people try to base64-encode it or use string concatenation. This is pointless:
+- Trivial to reverse
+- Breaks transparency
 - Doesn't prevent anything
-- Adds complexity for users
 
-### ❌ DON'T: Hide the URL
+**Don't store secrets in code**
 
+Never do this:
 ```go
-// BAD IDEA:
-const API_URL = obfuscate("https://...")
+const PRIVATE_KEY = "0x..." // ← NEVER
 ```
 
-**Why not:**
-- "Security through obscurity" is not security
-- Attacker decompiles binary, finds URL
-- Doesn't prevent any attacks
-- Breaks legitimate integrations
+You're already doing it correctly (environment variables), but worth stating explicitly.
 
-### ❌ DON'T: Store Private Keys in Code
+## What You Should Do
 
-```go
-// NEVER DO THIS:
-const FAUCET_PRIVATE_KEY = "0x5f7c..."
-```
+**Monitor the faucet balance**
 
-**Why not:**
-- Anyone can drain your entire wallet
-- Attackers scan GitHub for private keys
-- You're already doing this correctly (env vars) ✓
-
----
-
-## What You SHOULD Do
-
-### ✅ DO: Keep Private Keys in Environment Variables
+Add a check that alerts you when balance is low:
 
 ```go
-// CORRECT (what you're already doing):
-privateKey := os.Getenv("FAUCET_PRIVATE_KEY")
-```
-
-**Stored in:**
-- Koyeb Secrets (encrypted)
-- Never in Git
-- Never in code
-- Never in logs
-
-### ✅ DO: Monitor Unusual Activity
-
-Check logs for:
-- Same IP making many requests
-- Same address requesting repeatedly
-- Unusual traffic spikes
-- Failed PoW attempts (could indicate attack)
-
-### ✅ DO: Set Balance Alerts
-
-```go
-// Recommended: Add to handlers.go
-if balance < minimumBalance {
-    h.logger.Warn("Faucet balance low",
-        zap.String("balance", balance))
-    // Send alert to your email/Discord/Telegram
+balance, _ := h.starknet.GetBalance(ctx, "STRK")
+if balance < 100 {
+    h.logger.Warn("Faucet balance low", zap.String("balance", balance))
+    // TODO: Send alert to Telegram/Discord
 }
 ```
 
-### ✅ DO: Keep Dependencies Updated
+**Keep an eye on logs**
+
+Koyeb gives you logs. Watch for:
+- Same IP hitting rate limits repeatedly
+- Failed PoW attempts (might indicate attack)
+- Unusual traffic spikes
+
+**Update dependencies periodically**
 
 ```bash
-go get -u ./...  # Update Go dependencies
-npm update       # Update npm dependencies
+go get -u ./...
+npm update
 ```
 
-Security patches are released regularly.
+Security patches happen. Stay up to date.
 
----
+## Potential Improvements
 
-## Security Checklist
+If you wanted to make this even more robust:
 
-- [x] Private keys stored in environment variables (not code)
-- [x] HTTPS enabled (Koyeb provides SSL)
-- [x] Rate limiting implemented (5/day per IP)
-- [x] PoW challenge implemented (difficulty 6)
-- [x] Challenge expiry implemented (5 min TTL)
-- [x] Challenge one-time use (deleted after use)
-- [x] IP-based throttling (1 hour per token)
-- [x] Address validation
-- [x] Token validation
-- [x] CORS configured (allow all for public API)
-- [x] No secrets in Git history
-- [x] Logging enabled (Koyeb logs)
-- [ ] Balance monitoring alerts (optional improvement)
-- [ ] Automatic PoW difficulty adjustment (optional improvement)
+**Address-based rate limiting**
 
----
-
-## Recommended Improvements (Optional)
-
-### 1. Add Balance Monitoring
+Currently only limiting by IP. Could also limit per address:
 
 ```go
-func (h *Handler) checkBalanceAndAlert(ctx context.Context) {
-    balance, _ := h.starknet.GetBalance(ctx, "STRK")
-
-    if balance < 100 {  // Less than 100 STRK remaining
-        h.logger.Error("⚠️ FAUCET BALANCE LOW",
-            zap.String("balance", balance))
-        // TODO: Send email/Telegram alert
-    }
+addressRequests := h.redis.GetAddressRequestCount(req.Address, 24*time.Hour)
+if addressRequests >= 2 {
+    return c.Status(429).JSON(...)
 }
 ```
 
-### 2. Add Dynamic PoW Difficulty
+Prevents someone from using the same address across multiple IPs.
+
+**Dynamic PoW difficulty**
+
+Adjust based on request rate:
 
 ```go
-func (h *Handler) adjustPoWDifficulty() {
-    requestRate := h.redis.GetRequestRateLastHour()
-
-    if requestRate > 100 {  // Unusually high
-        h.config.PoWDifficulty = 8  // Harder
-    } else {
-        h.config.PoWDifficulty = 6  // Normal
-    }
+hourlyRate := h.redis.GetRequestRateLastHour()
+if hourlyRate > 100 {
+    h.config.PoWDifficulty = 8  // Harder
+} else {
+    h.config.PoWDifficulty = 6  // Normal
 }
 ```
 
-### 3. Add Address-Based Rate Limiting
+If someone's attacking, make it harder. If it's quiet, make it easier for legitimate users.
 
-```go
-// In addition to IP limiting
-func (h *Handler) checkAddressLimit(address string) error {
-    count := h.redis.GetAddressRequestCount(address, 24*time.Hour)
+**Cloudflare in front**
 
-    if count > 2 {  // Max 2 requests per address per day
-        return errors.New("address limit exceeded")
-    }
+Put Cloudflare (or similar) in front of Koyeb. Gets you:
+- DDoS protection
+- Bot detection
+- Caching (for `/health` and `/info` endpoints)
 
-    return nil
-}
-```
-
----
+But honestly for a testnet faucet, probably overkill.
 
 ## Summary
 
-### Is the hardcoded URL a security risk?
+The API URL being public is not a security problem. The backend has multiple layers of protection:
 
-**No.** Here's why:
+1. IP rate limiting (5/day)
+2. Token throttling (1/hour)
+3. Proof of work (30s CPU per request)
+4. Challenge expiry (5 min TTL)
+5. One-time challenges
+6. HTTPS encryption
 
-1. **Public APIs need public URLs** - CLI and frontend must access it
-2. **Security is in the backend** - Rate limiting, PoW, validation
-3. **Hiding URLs doesn't prevent attacks** - "Security through obscurity" is not security
-4. **Your defenses work** - Multiple layers prevent abuse
+An attacker can't bypass these by knowing the URL. They'd need to actually solve the PoW challenges and still be limited to 5 requests per IP per day.
 
-### What actually matters for security:
+For a testnet faucet distributing worthless tokens, this is more than sufficient.
 
-✅ Private keys → Environment variables (not code)
-✅ Rate limiting → 5/day per IP, 1/hour per token
-✅ Proof of Work → CPU cost for attackers
-✅ Challenge expiry → Can't pre-solve
-✅ HTTPS → Encrypted communication
+If this was mainnet with real money, you'd want:
+- Hardware wallet or MPC for the private key (not env var)
+- More sophisticated rate limiting (maybe challenge-response systems)
+- Monitoring and alerting
+- Probably KYC or something (but then it's not really a faucet anymore)
 
-### What doesn't matter for security:
-
-❌ Hiding the API URL
-❌ Obfuscating the code
-❌ Adding fake API keys
-
----
-
-## Questions?
-
-If you want to improve security further:
-- Add balance monitoring alerts
-- Add address-based rate limiting
-- Add dynamic PoW difficulty adjustment
-- Add IP reputation checking
-- Add webhook for suspicious activity
-
-But your current setup is **secure enough** for a testnet faucet. The value of testnet tokens is $0, so attackers have no economic incentive to bypass your defenses.
+But for Sepolia testnet, the current setup is fine.

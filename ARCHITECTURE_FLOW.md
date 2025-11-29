@@ -1,635 +1,366 @@
-# Starknet Faucet - Complete Architecture & Flow
+# Architecture Overview
 
-## Overview
+This doc explains how the faucet works end-to-end, from when someone runs `npm install` to when tokens hit their wallet.
 
-Your faucet has **3 components** that work together:
+## The Three Components
 
-1. **CLI (Client)** - Users install via npm and run on their terminal
-2. **Backend API (Server)** - Deployed on Koyeb, handles requests and sends transactions
-3. **Frontend (Website)** - Shows stats and provides web-based interface
+The faucet is split into three parts:
 
----
+**CLI** - A Go binary that users install via npm. Runs on their machine.
+**Backend** - API server on Koyeb. Validates requests and sends transactions.
+**Frontend** - Your website that shows stats by calling the same backend API.
 
-## Component Details
-
-### 1. CLI (Command-Line Tool)
-
-**Location:** `cmd/cli/main.go`, `pkg/cli/*`
-
-**What it does:**
-- Runs locally on user's machine
-- Shows banner, CAPTCHA, progress
-- Solves Proof of Work locally
-- Sends HTTP requests to Backend API
-
-**Installation Flow:**
-```
-User runs: npm install -g starknet-faucet@1.0.16
-    ↓
-npm executes: node install.js
-    ↓
-install.js downloads binary from GitHub releases:
-  https://github.com/Giri-Aayush/starknet-faucet/releases/download/v1.0.16/starknet-faucet-linux-amd64
-    ↓
-Binary saved to: node_modules/starknet-faucet/bin/starknet-faucet
-    ↓
-Made executable: chmod +x
-    ↓
-npm creates global symlink: /usr/local/bin/starknet-faucet → node_modules/...
-```
-
-**Runtime Flow:**
-```
-User runs: starknet-faucet request 0x123...
-    ↓
-CLI binary executes (Go program)
-    ↓
-Shows banner + CAPTCHA
-    ↓
-Makes HTTP requests to Backend API
-```
-
-### 2. Backend API (Server)
-
-**Location:** `cmd/server/main.go`, `internal/*`
-
-**Deployed on:** Koyeb (https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app)
-
-**What it does:**
-- Receives HTTP requests from CLI and Frontend
-- Validates PoW solutions
-- Manages rate limiting (Redis)
-- Sends blockchain transactions (via Alchemy RPC)
-- Returns transaction hashes
-
-**Deployment:**
-```
-Code pushed to GitHub
-    ↓
-Koyeb auto-deploys (watches main branch)
-    ↓
-Builds Docker image: deployments/docker/Dockerfile.server
-    ↓
-Starts container on Koyeb infrastructure
-    ↓
-Exposed at: https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app
-```
-
-**Running Services:**
-- Fiber web server (port 8080)
-- Connected to Upstash Redis (rate limiting)
-- Connected to Alchemy Starknet RPC (blockchain)
-
-### 3. Frontend (Website)
-
-**What it shows:**
-- Live faucet balance
-- Distribution limits
-- Request statistics
-- Health status
-
-**How it works:**
-Makes HTTP GET requests to Backend API endpoints:
-- `/health` - Server status
-- `/api/v1/info` - Faucet info and balance
-- (Other endpoints for web-based token requests)
+Think of it like this: the CLI and frontend are both clients talking to the same server.
 
 ---
 
-## Complete Request Flow
+## How Installation Works
 
-Let me trace what happens when a user requests tokens:
+When someone runs:
+```bash
+npm install -g starknet-faucet
+```
 
-### Step 1: User Runs CLI Command
+Here's what happens:
+
+1. npm downloads the package (5 KB - just has `install.js` and some metadata)
+2. npm runs the postinstall script (`node install.js`)
+3. `install.js` detects their OS and downloads the right binary:
+   - Linux AMD64: 2.2 MB (UPX compressed)
+   - Linux ARM64: 1.9 MB (UPX compressed)
+   - macOS: 6.6 MB (can't compress on macOS)
+   - Windows: 2.2 MB (UPX compressed)
+4. Binary gets saved to `node_modules/starknet-faucet/bin/starknet-faucet`
+5. npm creates a symlink in `/usr/local/bin` so it's in PATH
+
+Now when they type `starknet-faucet`, the shell finds the binary and runs it.
+
+The binary is just a compiled Go program - no runtime dependencies, no Node.js needed at runtime.
+
+---
+
+## Request Flow Walkthrough
+
+Let me trace what happens when someone requests tokens. I'll use an actual example from testing:
 
 ```bash
 starknet-faucet request 0x02ca67d3b01d9546a995880cc88173cd7335044f222370f047275b90c8e384fb
 ```
 
-**What happens locally (on user's machine):**
+### Step 1: Local validation
 
-```
-┌─────────────────────────────────────┐
-│  User's Terminal (CLI Binary)      │
-├─────────────────────────────────────┤
-│                                     │
-│  1. Parse arguments                 │
-│     ✓ Address: 0x02ca67...          │
-│     ✓ Token: STRK (default)         │
-│                                     │
-│  2. Show banner                     │
-│     ────────────────────────        │
-│     Starknet Terminal Faucet        │
-│     ────────────────────────        │
-│                                     │
-│  3. Ask CAPTCHA                     │
-│     Q: What drink is made from      │
-│        coffee beans?                │
-│     User types: coffee              │
-│     ✓ Correct!                      │
-│                                     │
-└─────────────────────────────────────┘
-```
-
-**Code:** `pkg/cli/commands/request.go` line 89-101
+The CLI parses the command and validates the address format. If it's malformed, it fails immediately without hitting the API.
 
 ```go
-// Print banner (unless JSON output)
-if !jsonOut {
-    ui.PrintBanner()
+// pkg/cli/commands/request.go
+if err := utils.ValidateStarknetAddress(address); err != nil {
+    return fmt.Errorf("invalid address: %w", err)
+}
+```
 
-    // Ask verification question (3 attempts)
-    correct, err := captcha.AskQuestionWithRetries(3)
-    if err != nil {
-        return fmt.Errorf("verification failed: %w", err)
+### Step 2: CAPTCHA
+
+The CLI shows a simple question like "What drink is made from coffee beans?"
+
+This happens entirely locally - just reads from a hardcoded list of 100+ questions. The backend doesn't even know about it. It's just to slow down bots that might spam the CLI.
+
+### Step 3: Get a challenge
+
+Now the real flow starts. CLI makes an HTTP request:
+
+```
+GET https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app/api/v1/challenge
+```
+
+Backend generates a random hex string and stores it in Redis with a 5-minute expiry:
+
+```go
+// internal/api/handlers.go
+challenge := generateRandomHex(32)
+challengeID := uuid.New()
+redis.Set("challenge:"+challengeID, challenge, 5*time.Minute)
+```
+
+Returns:
+```json
+{
+  "challenge_id": "550e8400-e29b-41d4-a716-446655440000",
+  "challenge": "0x4f8a2c9b3e1d7f6a...",
+  "difficulty": 6
+}
+```
+
+### Step 4: Solve proof of work (locally)
+
+This is the interesting part. The CLI needs to find a number (nonce) where:
+
+```
+SHA256(challenge + nonce) starts with N zeros
+```
+
+With difficulty 6, that means the hash needs to start with "000000".
+
+The CLI just brute forces it:
+
+```go
+// pkg/cli/pow/solver.go
+for nonce := int64(0); ; nonce++ {
+    hash := sha256.Sum256([]byte(challenge + strconv.FormatInt(nonce, 10)))
+    hashHex := hex.EncodeToString(hash[:])
+
+    if strings.HasPrefix(hashHex, strings.Repeat("0", difficulty)) {
+        return nonce // Found it!
     }
 }
 ```
 
----
+On average this takes 20-60 seconds depending on your CPU. The user sees a spinner with progress updates.
 
-### Step 2: Request Challenge from Backend
+The key point: **the user's CPU does this work, not the server**. That's the whole point of proof of work.
 
-**CLI → Backend API**
+### Step 5: Submit the request
+
+Now the CLI has:
+- challenge_id
+- nonce (the solution)
+- address (where to send tokens)
+- token (STRK, ETH, or BOTH)
+
+It sends a POST request:
 
 ```
-┌─────────────────────────────────────┐
-│  CLI makes HTTP GET request         │
-├─────────────────────────────────────┤
-│                                     │
-│  GET https://intermediate-          │
-│  albertine-aayushgiri-e93ace53.     │
-│  koyeb.app/api/v1/challenge         │
-│                                     │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│  Backend API (Koyeb)                │
-├─────────────────────────────────────┤
-│                                     │
-│  Handler: GetChallenge()            │
-│                                     │
-│  1. Generate random challenge       │
-│     challenge = random hex string   │
-│                                     │
-│  2. Store in Redis (5 min TTL)      │
-│     challengeID → challenge         │
-│                                     │
-│  3. Return JSON response            │
-│                                     │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│  Response to CLI                    │
-├─────────────────────────────────────┤
-│  {                                  │
-│    "challenge_id": "abc123",        │
-│    "challenge": "0x4f8a2...",       │
-│    "difficulty": 6                  │
-│  }                                  │
-└─────────────────────────────────────┘
-```
+POST https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app/api/v1/request
+Content-Type: application/json
 
-**Backend Code:** `internal/api/handlers/challenge.go`
-
-```go
-func (h *Handler) GetChallenge(c *fiber.Ctx) error {
-    // Generate random challenge
-    challenge := generateRandomChallenge()
-    challengeID := generateID()
-
-    // Store in Redis with 5 min expiry
-    h.redis.Set(ctx, "challenge:"+challengeID, challenge, 5*time.Minute)
-
-    return c.JSON(ChallengeResponse{
-        ChallengeID: challengeID,
-        Challenge:   challenge,
-        Difficulty:  h.config.PoWDifficulty, // 6
-    })
+{
+  "address": "0x02ca67...",
+  "token": "STRK",
+  "challenge_id": "550e8400-e29b-41d4-a716-446655440000",
+  "nonce": 800047
 }
 ```
 
-**CLI Code:** `pkg/cli/api_client.go`
+### Step 6: Backend validates everything
 
+The backend does a bunch of checks (see `internal/api/handlers.go`):
+
+**Check 1: IP rate limit**
 ```go
-func (c *APIClient) GetChallenge() (*models.ChallengeResponse, error) {
-    resp, err := http.Get(c.baseURL + "/api/v1/challenge")
-    // ... parse JSON response
+ip := c.IP()
+canRequest, currentCount, cooldownEnd := redis.CheckIPDailyLimit(ip)
+if !canRequest {
+    return 429 // Too Many Requests
 }
 ```
 
----
+Someone can only make 5 requests per day from the same IP. After the 5th request, they're locked out for 24 hours.
 
-### Step 3: Solve Proof of Work (Locally on User's Machine)
-
-**What happens:**
-
-```
-┌─────────────────────────────────────┐
-│  CLI - PoW Solver                   │
-├─────────────────────────────────────┤
-│                                     │
-│  Challenge: 0x4f8a2...              │
-│  Difficulty: 6                      │
-│                                     │
-│  Finding nonce where:               │
-│  SHA256(challenge + nonce)          │
-│  starts with 6 zeros                │
-│                                     │
-│  Try nonce = 0:                     │
-│    hash = 0x8a3f... ✗ (only 2)     │
-│                                     │
-│  Try nonce = 1:                     │
-│    hash = 0x5b2c... ✗ (only 3)     │
-│                                     │
-│  Try nonce = 800047:                │
-│    hash = 0x000000a1... ✓ (6!)     │
-│                                     │
-│  ✓ Challenge solved in 0.2s         │
-│    Nonce: 800047                    │
-│                                     │
-└─────────────────────────────────────┘
-```
-
-**Why locally?**
-- Prevents DDoS attacks (attacker's CPU does work, not your server)
-- User sees progress in terminal
-- Server just validates the solution
-
-**CLI Code:** `pkg/cli/pow/solver.go`
-
+**Check 2: Token throttle**
 ```go
-func (s *Solver) Solve(challenge string, difficulty int, progressCallback func(int64, time.Duration)) (*Result, error) {
-    target := strings.Repeat("0", difficulty)
-
-    for nonce := int64(0); ; nonce++ {
-        hash := sha256Hash(challenge + fmt.Sprint(nonce))
-
-        if strings.HasPrefix(hash, target) {
-            // Found valid nonce!
-            return &Result{
-                Nonce:    nonce,
-                Hash:     hash,
-                Duration: time.Since(start),
-            }, nil
-        }
-
-        // Update progress every 1000 attempts
-        if nonce%1000 == 0 && progressCallback != nil {
-            progressCallback(nonce, time.Since(start))
-        }
-    }
+canRequestToken, nextAvailable := redis.CheckTokenHourlyThrottle(ip, "STRK")
+if !canRequestToken {
+    return 429 // Too Many Requests
 }
 ```
 
----
+Even if you have quota left, you can only request the same token once per hour.
 
-### Step 4: Submit Token Request to Backend
-
-**CLI → Backend API**
-
-```
-┌─────────────────────────────────────┐
-│  CLI makes HTTP POST request        │
-├─────────────────────────────────────┤
-│                                     │
-│  POST https://intermediate-         │
-│  albertine-aayushgiri-e93ace53.     │
-│  koyeb.app/api/v1/request           │
-│                                     │
-│  Body (JSON):                       │
-│  {                                  │
-│    "address": "0x02ca67...",        │
-│    "token": "STRK",                 │
-│    "challenge_id": "abc123",        │
-│    "nonce": 800047                  │
-│  }                                  │
-│                                     │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│  Backend API (Koyeb)                │
-├─────────────────────────────────────┤
-│                                     │
-│  Handler: RequestTokens()           │
-│                                     │
-│  1. Get client IP                   │
-│     ip = "203.0.113.45"             │
-│                                     │
-│  2. Check rate limits (Redis)       │
-│     ✓ IP has 4/5 requests left      │
-│     ✓ STRK throttle OK (>1hr ago)   │
-│                                     │
-│  3. Verify PoW solution             │
-│     challenge = Redis.get(abc123)   │
-│     hash = SHA256(challenge+800047) │
-│     ✓ Starts with 6 zeros           │
-│                                     │
-│  4. Send blockchain transaction     │
-│     (see Step 5)                    │
-│                                     │
-└─────────────────────────────────────┘
-```
-
-**Backend Code:** `internal/api/handlers/request.go`
-
+**Check 3: Verify the proof of work**
 ```go
-func (h *Handler) RequestTokens(c *fiber.Ctx) error {
-    var req RequestBody
-    c.BodyParser(&req)
+storedChallenge := redis.Get("challenge:" + challengeID)
+hash := sha256.Sum256([]byte(storedChallenge + strconv.FormatInt(nonce, 10)))
+hashHex := hex.EncodeToString(hash[:])
 
-    // 1. Get IP
-    ip := c.IP()
-
-    // 2. Check rate limits
-    if err := h.rateLimit.Check(ip, req.Token); err != nil {
-        return c.Status(429).JSON(fiber.Map{"error": "rate limit exceeded"})
-    }
-
-    // 3. Verify PoW
-    challenge, _ := h.redis.Get("challenge:" + req.ChallengeID)
-    if !verifyPoW(challenge, req.Nonce, h.difficulty) {
-        return c.Status(400).JSON(fiber.Map{"error": "invalid PoW"})
-    }
-
-    // 4. Send transaction (see next step)
-    txHash, err := h.starknet.Transfer(req.Address, req.Token, amount)
-
-    // 5. Update rate limits in Redis
-    h.rateLimit.Record(ip, req.Token)
-
-    return c.JSON(fiber.Map{
-        "success": true,
-        "tx_hash": txHash,
-        "amount": "10",
-        "token": "STRK",
-    })
+if !strings.HasPrefix(hashHex, strings.Repeat("0", difficulty)) {
+    return 400 // Bad Request - invalid PoW
 }
 ```
 
----
+If someone tries to skip the work and submit a random nonce, this check fails.
 
-### Step 5: Backend Sends Blockchain Transaction
-
-**Backend API → Alchemy RPC → Starknet**
-
-```
-┌─────────────────────────────────────┐
-│  Backend API                        │
-├─────────────────────────────────────┤
-│                                     │
-│  1. Build transfer transaction      │
-│     From: Faucet wallet             │
-│           0x31167a4...              │
-│     To:   User address              │
-│           0x02ca67...               │
-│     Amount: 10 STRK                 │
-│                                     │
-│  2. Sign with faucet private key    │
-│     (from env: FAUCET_PRIVATE_KEY)  │
-│                                     │
-│  3. Send to Starknet via Alchemy    │
-│                                     │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│  Alchemy RPC                        │
-│  (Starknet Gateway)                 │
-├─────────────────────────────────────┤
-│                                     │
-│  POST https://starknet-sepolia.     │
-│  g.alchemy.com/starknet/version/    │
-│  rpc/v0_9/cWsqpE1AYKEJM6-JaS28G     │
-│                                     │
-│  Method: starknet_addInvokeTransaction│
-│                                     │
-│  ✓ Transaction accepted             │
-│  TX Hash: 0x6139cd4b...             │
-│                                     │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│  Starknet Blockchain                │
-├─────────────────────────────────────┤
-│                                     │
-│  Transaction pending...             │
-│  (takes ~10-30 seconds)             │
-│                                     │
-│  ✓ Transaction confirmed            │
-│  Block: #123456                     │
-│                                     │
-└─────────────────────────────────────┘
+**Check 4: Delete the challenge**
+```go
+redis.Delete("challenge:" + challengeID)
 ```
 
-**Backend Code:** `internal/starknet/client.go`
+Challenges are one-time use. Can't reuse the same solution.
+
+If all checks pass, move to the next step.
+
+### Step 7: Send the transaction
+
+Now the backend needs to actually send tokens on Starknet. It uses the starknet.go library to build and sign a transaction:
 
 ```go
-func (fc *FaucetClient) Transfer(toAddress, token string, amount *big.Int) (string, error) {
-    // 1. Build transaction calldata
-    calldata := buildTransferCalldata(toAddress, amount)
+// internal/starknet/client.go
+amount := new(big.Int).Mul(big.NewInt(10), big.NewInt(1e18)) // 10 STRK
 
-    // 2. Create invoke transaction
-    tx := rpc.InvokeTxnV1{
-        SenderAddress: fc.accountAddress,
-        Calldata:     calldata,
-        // ... signatures, nonce, etc.
-    }
+tx := account.BuildInvokeTransaction(
+    tokenContract,
+    "transfer",
+    []interface{}{userAddress, amount},
+)
 
-    // 3. Sign transaction
-    signature := fc.account.Sign(tx)
+signedTx := account.Sign(tx, privateKey) // Uses faucet private key from env
 
-    // 4. Send to Alchemy RPC
-    resp, err := fc.provider.AddInvokeTransaction(ctx, tx)
+txHash, err := provider.AddInvokeTransaction(signedTx)
+```
 
-    return resp.TransactionHash, nil
+The `provider` is connected to Alchemy's Starknet RPC endpoint:
+```
+https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_9/cWsqpE1AYKEJM6-JaS28G
+```
+
+Alchemy forwards the transaction to the Starknet network. It goes into the mempool, gets picked up by a sequencer, and eventually gets included in a block (usually takes 10-30 seconds).
+
+### Step 8: Return the response
+
+Backend sends back:
+```json
+{
+  "success": true,
+  "tx_hash": "0x6139cd4b0c3fed17ea582d50453107b381153081b207b4cbad7e88f82e8d55f",
+  "amount": "10",
+  "token": "STRK",
+  "explorer_url": "https://sepolia.voyager.online/tx/0x6139cd4b..."
 }
 ```
 
-**Environment Variables (Koyeb):**
+CLI displays it nicely:
 ```
-STARKNET_RPC_URL=https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_9/cWsqpE1AYKEJM6-JaS28G
-FAUCET_PRIVATE_KEY=0x5f7c...  (your faucet wallet private key)
-FAUCET_ADDRESS=0x31167a4...
+✓ Transaction submitted!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Amount:  10 STRK
+  TX Hash:  0x6139cd4b...82e8d55f
+
+  🔗 https://sepolia.voyager.online/tx/...
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Tokens will arrive in ~30 seconds.
 ```
+
+Done. Tokens show up in the user's wallet about 30 seconds later once the transaction confirms.
 
 ---
 
-### Step 6: Response Back to User
+## How the Frontend Fits In
 
-**Backend API → CLI → User**
-
-```
-┌─────────────────────────────────────┐
-│  Backend sends JSON response        │
-├─────────────────────────────────────┤
-│  {                                  │
-│    "success": true,                 │
-│    "tx_hash": "0x6139cd4b...",      │
-│    "amount": "10",                  │
-│    "token": "STRK",                 │
-│    "explorer_url": "https://        │
-│      sepolia.voyager.online/tx/..." │
-│  }                                  │
-└─────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────┐
-│  CLI receives response              │
-├─────────────────────────────────────┤
-│                                     │
-│  ✓ Transaction submitted!           │
-│                                     │
-│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━    │
-│    Amount:  10 STRK                 │
-│    TX Hash:  0x6139cd4b...82e8d55f  │
-│                                     │
-│    🔗 https://sepolia.voyager...    │
-│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━    │
-│                                     │
-│  ✓ Tokens will arrive in ~30s.      │
-│                                     │
-└─────────────────────────────────────┘
-```
-
----
-
-## Frontend Integration
-
-Your website also connects to the same Backend API:
-
-### Frontend → Backend API
+The website just calls the same API endpoints:
 
 ```javascript
-// Get faucet info (balance, limits, etc.)
+// Get faucet balance and info
 fetch('https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app/api/v1/info')
-  .then(res => res.json())
+  .then(r => r.json())
   .then(data => {
-    // Update UI with:
-    // - STRK balance: data.faucet_balance.strk
-    // - ETH balance: data.faucet_balance.eth
-    // - Daily limit: data.limits.daily_requests_per_ip
+    // data.faucet_balance.strk
+    // data.faucet_balance.eth
+    // data.limits.daily_requests_per_ip
   });
 
 // Check health
 fetch('https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app/health')
-  .then(res => res.json())
+  .then(r => r.json())
   .then(data => {
-    // Show: data.status === "ok"
+    // data.status === "ok"
   });
 ```
 
-**Backend API Endpoints:**
+The backend has CORS enabled (`AllowOrigins: "*"`) so browsers can make these requests from any domain.
 
-| Endpoint | Method | Purpose | Used By |
+If you wanted to add a web-based faucet UI (not just stats), you'd use the same `/api/v1/challenge` and `/api/v1/request` endpoints. You'd just need to implement the PoW solver in JavaScript.
+
+---
+
+## API Endpoints Reference
+
+| Endpoint | Method | Used By | Purpose |
 |----------|--------|---------|---------|
-| `/health` | GET | Server health check | Frontend, CLI, Monitoring |
-| `/api/v1/info` | GET | Faucet info & balance | Frontend |
-| `/api/v1/challenge` | GET | Get PoW challenge | CLI |
-| `/api/v1/request` | POST | Request tokens | CLI, Frontend |
-| `/api/v1/quota` | GET | Check user's quota | CLI |
-| `/api/v1/limits` | GET | Get rate limit rules | CLI |
+| `/health` | GET | Frontend, CLI, monitoring | Health check |
+| `/api/v1/info` | GET | Frontend | Get balance and limits |
+| `/api/v1/challenge` | POST | CLI | Get PoW challenge |
+| `/api/v1/request` | POST | CLI | Request tokens |
+| `/api/v1/quota` | GET | CLI | Check user's quota |
+| `/api/v1/limits` | GET | CLI | Get rate limit info |
+
+Note: Some endpoints are POST that should probably be GET (like `/api/v1/challenge`), but that's just how it evolved. Might clean that up later.
 
 ---
 
-## Data Flow Summary
+## Deployment
 
-```
-┌──────────────┐
-│   User's PC  │
-│              │
-│   CLI Tool   │  (Go binary installed via npm)
-└──────┬───────┘
-       │ HTTP requests
-       ↓
-┌──────────────┐
-│    Koyeb     │
-│              │
-│  Backend API │  (Go server, Fiber framework)
-└──┬────────┬──┘
-   │        │
-   │        └─────→ Upstash Redis (rate limiting)
-   │
-   └────────────→ Alchemy RPC
-                  ↓
-             Starknet Blockchain
-```
+The backend auto-deploys from GitHub to Koyeb:
 
-**Parallel Flow:**
+1. Push to `main` branch
+2. Koyeb detects the push (webhook)
+3. Builds Docker image using `deployments/docker/Dockerfile.server`
+4. Deploys to a container with these env vars:
+   - `STARKNET_RPC_URL` - Alchemy endpoint
+   - `FAUCET_PRIVATE_KEY` - Wallet that sends tokens
+   - `REDIS_URL` - Upstash Redis (for rate limiting)
+   - `STRK_TOKEN_ADDRESS` - STRK contract on Sepolia
+   - `ETH_TOKEN_ADDRESS` - ETH contract on Sepolia
+   - `POW_DIFFICULTY` - Currently set to 6
 
-```
-┌──────────────┐
-│   Browser    │
-│              │
-│   Frontend   │  (React/Vue/HTML)
-└──────┬───────┘
-       │ HTTP requests
-       ↓
-┌──────────────┐
-│    Koyeb     │
-│              │
-│  Backend API │  (Same server!)
-└──────────────┘
-```
+The whole deploy takes about 2-3 minutes. Old instances stay up until new ones pass health checks, so there's no downtime.
 
 ---
 
-## Key Points
+## Common Questions
 
-### 1. CLI is Just a Client
-- It's a standalone Go binary
-- Runs on user's machine
-- Makes HTTP calls to your API
-- Like `curl` but with nice UI
+**Q: Why distribute the CLI via npm if it's a Go binary?**
+A: npm is the most popular package manager. Developers already have it. Alternative would be Homebrew (macOS only), apt (Linux only), or "download from GitHub" (annoying). npm works everywhere and handles global installs nicely.
 
-### 2. Backend is the Brain
-- Handles all business logic
-- Manages rate limiting
-- Sends blockchain transactions
-- Serves both CLI and Frontend
+**Q: Why is the API URL hardcoded in the CLI?**
+A: Because the CLI runs on user's machines. It can't access your Koyeb environment variables. Users can override it with `--api-url` if they want to run their own instance.
 
-### 3. One Backend, Multiple Clients
-```
-CLI (terminal) ──┐
-                 ├──→ Backend API ──→ Starknet
-Frontend (web) ──┘
-```
+**Q: Why solve PoW on the client instead of the server?**
+A: DDoS protection. If the server had to do the work, an attacker could just spam requests and overload it. With client-side PoW, the attacker's CPU does the work. Each request costs them ~30 seconds of compute time.
 
-### 4. Why npm for a Go Binary?
-- npm is the most popular package manager
-- Easy distribution: `npm install -g`
-- Auto-updates
-- Cross-platform
-- Developers already have npm
+**Q: Can't someone modify the CLI to skip PoW?**
+A: They can modify their local copy, but the backend still validates the solution. If the hash doesn't start with 6 zeros, the request is rejected. You can't fake the math.
 
-### 5. Backend Environment
-Deployed on Koyeb with these env vars:
-```bash
-STARKNET_RPC_URL=https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_9/...
-FAUCET_PRIVATE_KEY=0x5f7c...
-FAUCET_ADDRESS=0x31167a4...
-REDIS_URL=redis://...upstash.io:6379
-STRK_TOKEN_ADDRESS=0x04718f...
-ETH_TOKEN_ADDRESS=0x049d36...
-POW_DIFFICULTY=6
-```
+**Q: Why Redis instead of in-memory rate limiting?**
+A: If the server restarts, in-memory state is lost. Redis persists rate limit data. Also, if we ever scale to multiple server instances, they can share the same Redis instance.
+
+**Q: Why testnet only?**
+A: Because the private key is in an environment variable, not a hardware wallet or MPC setup. That's fine for worthless testnet tokens, but you'd never do that with real money.
 
 ---
 
-## Security Layers
+## Code Structure
 
-1. **PoW Challenge** - CPU work prevents spam
-2. **CAPTCHA** - Human verification
-3. **IP Rate Limiting** - 5 requests/day per IP (Redis)
-4. **Token Throttling** - 1 hour per token
-5. **Challenge Expiry** - 5 minute TTL
-6. **Private Key Security** - Stored in Koyeb secrets
+```
+cmd/
+  cli/main.go           - CLI entry point
+  server/main.go        - Backend entry point
+
+pkg/cli/                - CLI-specific code
+  commands/             - Cobra commands
+  pow/solver.go         - PoW solver
+  captcha/questions.go  - CAPTCHA questions
+  ui/display.go         - Terminal UI
+
+internal/               - Backend code
+  api/
+    handlers.go         - HTTP handlers
+    routes.go           - Route setup
+  starknet/client.go    - Starknet interaction
+  cache/redis.go        - Redis client
+  pow/pow.go            - PoW verification
+  config/config.go      - Config loading
+
+deployments/
+  docker/Dockerfile.server  - Production Dockerfile
+  docker-compose.yml        - Local dev setup
+```
+
+The `pkg/` vs `internal/` split is a Go convention:
+- `pkg/` - Can be imported by other projects
+- `internal/` - Private to this project
+
+In practice, both are private here. Just following standard Go project layout.
 
 ---
 
-## Questions?
-
-Let me know if you want me to explain:
-- How Redis stores rate limit data
-- How the private key signing works
-- How Alchemy routes to Starknet
-- How to add new endpoints for your frontend
-- Anything else!
+That's the whole system. If you want to understand a specific part in more detail, check the code - it's pretty straightforward Go with minimal abstractions.
