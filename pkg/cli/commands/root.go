@@ -53,7 +53,7 @@ Security:
   • CAPTCHA verification (human check)
 
 Need help? Visit: https://github.com/Giri-Aayush/starknet-faucet`,
-	Version: "1.0.13",
+	Version: "1.0.14",
 }
 
 // Execute runs the root command
@@ -66,7 +66,7 @@ func Execute() {
 
 func init() {
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&apiURL, "api-url", "https://starknet-faucet-gnq5.onrender.com", "Faucet API URL")
+	rootCmd.PersistentFlags().StringVar(&apiURL, "api-url", "https://intermediate-albertine-aayushgiri-e93ace53.koyeb.app", "Faucet API URL")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "Output in JSON format")
 

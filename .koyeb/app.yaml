@@ -1,0 +1,89 @@
+name: starknet-faucet
+
+services:
+  - name: faucet-api
+    type: web
+    build:
+      type: dockerfile
+      dockerfile: deployments/docker/Dockerfile.server
+    ports:
+      - port: 8080
+        protocol: http
+    env:
+      # Network Configuration
+      - key: PORT
+        value: "8080"
+      - key: NETWORK
+        value: "sepolia"
+      - key: LOG_LEVEL
+        value: "info"
+
+      # Starknet RPC (using Alchemy v2 endpoint - v0.8.1)
+      # Note: Update this when Alchemy v0.9 endpoint is back online
+      - key: STARKNET_RPC_URL
+        secret: STARKNET_RPC_URL
+
+      # Faucet Wallet Credentials
+      - key: FAUCET_PRIVATE_KEY
+        secret: FAUCET_PRIVATE_KEY
+      - key: FAUCET_ADDRESS
+        secret: FAUCET_ADDRESS
+
+      # Token Addresses (Sepolia)
+      - key: ETH_TOKEN_ADDRESS
+        value: "0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7"
+      - key: STRK_TOKEN_ADDRESS
+        value: "0x04718f5a0Fc34cC1AF16A1cdee98fFB20C31f5cD61D6Ab07201858f4287c938D"
+
+      # Redis (using Upstash Redis)
+      - key: REDIS_URL
+        secret: REDIS_URL
+
+      # PoW Settings
+      - key: POW_DIFFICULTY
+        value: "6"
+      - key: CHALLENGE_TTL
+        value: "300"
+
+      # Distribution Settings
+      - key: DRIP_AMOUNT_STRK
+        value: "10"
+      - key: DRIP_AMOUNT_ETH
+        value: "0.01"
+
+      # Rate Limiting
+      - key: MAX_REQUESTS_PER_DAY_IP
+        value: "5"
+      - key: MAX_CHALLENGES_PER_HOUR
+        value: "8"
+
+      # Global Distribution Limits (Anti-Drain)
+      - key: MAX_TOKENS_PER_HOUR_STRK
+        value: "500"
+      - key: MAX_TOKENS_PER_DAY_STRK
+        value: "10000"
+      - key: MAX_TOKENS_PER_HOUR_ETH
+        value: "5"
+      - key: MAX_TOKENS_PER_DAY_ETH
+        value: "100"
+
+      # Balance Protection
+      - key: MIN_BALANCE_PROTECT_PCT
+        value: "5"
+
+    health_check:
+      http:
+        path: /health
+        port: 8080
+      grace_period: 30
+      interval: 30
+      restart_limit: 3
+
+    regions:
+      - was  # Washington D.C.
+
+    instance_type: nano
+
+    scaling:
+      min: 1
+      max: 1
