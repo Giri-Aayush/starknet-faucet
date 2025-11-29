@@ -12,8 +12,10 @@ func SetupRoutes(app *fiber.App, handler *Handler) {
 	// Middleware
 	app.Use(recover.New())
 	app.Use(logger.New())
+	// CORS - Allow all origins for public faucet API
+	// CLI and frontend can make requests from anywhere
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: "*",  // Public API - allow all domains
 		AllowHeaders: "Origin, Content-Type, Accept",
 		AllowMethods: "GET, POST, OPTIONS",
 	}))
