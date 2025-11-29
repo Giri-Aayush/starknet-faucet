@@ -26,17 +26,16 @@ var (
 
 // PrintBanner prints the faucet banner
 func PrintBanner() {
-	banner := `
-   ███████╗████████╗ █████╗ ██████╗ ██╗  ██╗███╗   ██╗███████╗████████╗    ███████╗ █████╗ ██╗   ██╗ ██████╗███████╗████████╗
-   ██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██║ ██╔╝████╗  ██║██╔════╝╚══██╔══╝    ██╔════╝██╔══██╗██║   ██║██╔════╝██╔════╝╚══██╔══╝
-   ███████╗   ██║   ███████║██████╔╝█████╔╝ ██╔██╗ ██║█████╗     ██║       █████╗  ███████║██║   ██║██║     █████╗     ██║
-   ╚════██║   ██║   ██╔══██║██╔══██╗██╔═██╗ ██║╚██╗██║██╔══╝     ██║       ██╔══╝  ██╔══██║██║   ██║██║     ██╔══╝     ██║
-   ███████║   ██║   ██║  ██║██║  ██║██║  ██╗██║ ╚████║███████╗   ██║       ██║     ██║  ██║╚██████╔╝╚██████╗███████╗   ██║
-   ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝       ╚═╝     ╚═╝  ╚═╝ ╚═════╝  ╚═════╝╚══════╝   ╚═╝
+	title := "Starknet Terminal Faucet"
+	subtitle := "Testnet Tokens. Terminal-Native."
+	divider := strings.Repeat("─", 60)
 
-                                         Made with love • Secured by PoW
-`
-	fmt.Println(cyan(banner))
+	fmt.Println()
+	fmt.Println(cyan(divider))
+	fmt.Printf("  %s\n", bold(title))
+	fmt.Printf("  %s\n", subtitle)
+	fmt.Println(cyan(divider))
+	fmt.Println()
 }
 
 // PrintSuccess prints a success message

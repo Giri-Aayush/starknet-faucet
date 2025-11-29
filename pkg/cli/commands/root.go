@@ -53,7 +53,7 @@ Security:
   • CAPTCHA verification (human check)
 
 Need help? Visit: https://github.com/Giri-Aayush/starknet-faucet`,
-	Version: "1.0.14",
+	Version: "1.0.15",
 }
 
 // Execute runs the root command

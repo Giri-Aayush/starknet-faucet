@@ -8,7 +8,7 @@ const stream = require('stream');
 
 const pipeline = promisify(stream.pipeline);
 
-const VERSION = 'v1.0.12';
+const VERSION = 'v1.0.15';
 const GITHUB_REPO = 'Giri-Aayush/starknet-faucet';
 
 // Detect platform and architecture
