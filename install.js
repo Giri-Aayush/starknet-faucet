@@ -55,7 +55,7 @@ async function downloadBinary() {
       fs.mkdirSync(binDir, { recursive: true });
     }
 
-    // Download binary
+    // Download binary with progress indicator
     await new Promise((resolve, reject) => {
       https.get(downloadUrl, (response) => {
         if (response.statusCode === 302 || response.statusCode === 301) {
@@ -65,15 +65,60 @@ async function downloadBinary() {
               reject(new Error(`Download failed with status ${redirectResponse.statusCode}`));
               return;
             }
+
+            const totalBytes = parseInt(redirectResponse.headers['content-length'], 10);
+            let downloadedBytes = 0;
+            let lastPercent = 0;
+
+            // Progress indicator
+            console.log(`\n   Downloading...`);
+
+            redirectResponse.on('data', (chunk) => {
+              downloadedBytes += chunk.length;
+              const percent = Math.floor((downloadedBytes / totalBytes) * 100);
+
+              // Update every 10%
+              if (percent >= lastPercent + 10 || percent === 100) {
+                const bar = '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+                process.stdout.write(`\r   [${bar}] ${percent}%`);
+                lastPercent = percent;
+              }
+            });
+
             const fileStream = fs.createWriteStream(binaryPath);
             pipeline(redirectResponse, fileStream)
-              .then(resolve)
+              .then(() => {
+                console.log('\n');
+                resolve();
+              })
               .catch(reject);
           });
         } else if (response.statusCode === 200) {
+          const totalBytes = parseInt(response.headers['content-length'], 10);
+          let downloadedBytes = 0;
+          let lastPercent = 0;
+
+          // Progress indicator
+          console.log(`\n   Downloading...`);
+
+          response.on('data', (chunk) => {
+            downloadedBytes += chunk.length;
+            const percent = Math.floor((downloadedBytes / totalBytes) * 100);
+
+            // Update every 10%
+            if (percent >= lastPercent + 10 || percent === 100) {
+              const bar = '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+              process.stdout.write(`\r   [${bar}] ${percent}%`);
+              lastPercent = percent;
+            }
+          });
+
           const fileStream = fs.createWriteStream(binaryPath);
           pipeline(response, fileStream)
-            .then(resolve)
+            .then(() => {
+              console.log('\n');
+              resolve();
+            })
             .catch(reject);
         } else {
           reject(new Error(`Download failed with status ${response.statusCode}. Binary may not exist yet for ${binaryName}.`));
